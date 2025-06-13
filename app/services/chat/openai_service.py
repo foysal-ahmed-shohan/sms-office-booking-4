@@ -4,7 +4,7 @@ from typing import Dict, List, Optional, Tuple
 import json
 import logging
 from app.config import settings
-from app.schemas.booking_schema import BookingIntent, BookingSlots, RoomType, SLOT_PROMPTS
+from app.schemas.booking_schema import BookingIntent, BookingSlots, RoomType, SLOT_PROMPTS, get_dynamic_slot_prompts
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +21,34 @@ class OpenAIService:
         self.model = settings.openai_model or "gpt-4"
         logger.info(f"OpenAI service initialized with model: {self.model}")
         logger.debug(f"API key starts with: {self.api_key[:8]}...")
+    
+    def _get_available_locations(self) -> str:
+        """Get available locations from OfficeRND or fallback"""
+        try:
+            from app.services.officernd_service import officernd_service
+            locations = officernd_service.get_locations()
+            if locations:
+                location_names = [loc.get('name', '') for loc in locations if loc.get('name')]
+                return ", ".join(location_names)
+        except Exception as e:
+            logger.warning(f"Failed to get OfficeRND locations: {str(e)}")
+        
+        # Fallback to static list
+        return "Atlanta, New York, Dallas"
+    
+    def _get_available_room_types(self) -> str:
+        """Get available room types from OfficeRND or fallback"""
+        try:
+            from app.services.officernd_service import officernd_service
+            types = officernd_service.get_resource_types()
+            if types:
+                type_names = [rt.get('title', '') for rt in types if rt.get('title')]
+                return ", ".join(type_names)
+        except Exception as e:
+            logger.warning(f"Failed to get OfficeRND room types: {str(e)}")
+        
+        # Fallback to static list
+        return "Meeting room, Dedicated desk, Hotdesk"
         
     def extract_booking_intent(self, message: str, context: List[Dict] = None) -> BookingIntent:
         """Extract the user's intent from their message"""
@@ -106,15 +134,14 @@ class OpenAIService:
               * "SF" or "san fran" -> "San Francisco"
               * "LA" -> "Los Angeles"
               * "Chi town" -> "Chicago"
-              Available locations: Salt Lake City, New York, San Francisco, Chicago, Los Angeles, Boston, Seattle, Austin, Denver, Miami
+              Available locations: {self._get_available_locations()}
             
-            - room_type: Type of space needed. Map variations intelligently:
-              * "meeting room", "meeting space", "conference room for meetings" -> "meeting_room"
-              * "conference", "conf room", "large meeting room" -> "conference_room"
-              * "office", "private room", "quiet room" -> "private_office"
-              * "desk", "hot desk", "shared desk", "workspace" -> "hot_desk"
-              * "phone booth", "call room", "phone room" -> "phone_booth"
-              * "event space", "large room", "presentation room" -> "event_space"
+            - room_type: Type of space needed. Available types: {self._get_available_room_types()}
+              Map variations intelligently:
+              * "meeting room", "meeting space", "conference room" -> "meeting_room"
+              * "desk", "hot desk", "shared desk", "workspace" -> "hot_desk" or "hotdesk"
+              * "dedicated desk", "personal desk" -> "desk"
+              Only extract if it matches available types.
             
             - capacity: Number of people (extract any number mentioned with context like "for X people", "X person", "party of X")
             
@@ -259,9 +286,12 @@ class OpenAIService:
             else:
                 response = ""
             
+            # Get dynamic prompts
+            dynamic_prompts = get_dynamic_slot_prompts()
+            
             # Ask for the first missing slot
-            if missing[0] in SLOT_PROMPTS:
-                prompt = SLOT_PROMPTS[missing[0]]
+            if missing[0] in dynamic_prompts:
+                prompt = dynamic_prompts[missing[0]]
                 response += prompt
                 
                 # Add context about remaining items if more than one missing

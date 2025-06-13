@@ -3,7 +3,7 @@ import re
 from typing import Dict, List, Optional
 import logging
 from difflib import get_close_matches
-from app.schemas.booking_schema import BookingIntent, BookingSlots, RoomType, SLOT_PROMPTS, AVAILABLE_LOCATIONS
+from app.schemas.booking_schema import BookingIntent, BookingSlots, RoomType, SLOT_PROMPTS, AVAILABLE_LOCATIONS, get_dynamic_slot_prompts
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +53,24 @@ class SimpleChatService:
         """Extract booking information using patterns with fuzzy matching"""
         message_lower = message.lower()
         
-        # Extract location with fuzzy matching
+        # Extract location - Try dynamic OfficeRND data first
+        try:
+            from app.services.officernd_service import officernd_service
+            
+            # Check if any word in the message matches a location
+            words = message.split()
+            for word in words:
+                if len(word) >= 3:  # Skip very short words
+                    match = officernd_service.match_location(word)
+                    if match:
+                        current_slots.location = match.get('name')
+                        logger.info(f"Found OfficeRND location match: {current_slots.location}")
+                        location_found = True
+                        break
+        except Exception as e:
+            logger.warning(f"Failed to use OfficeRND service: {str(e)}")
+        
+        # Fallback to static location matching
         locations_lower = [loc.lower() for loc in AVAILABLE_LOCATIONS]
         location_found = False
         
@@ -255,7 +272,8 @@ class SimpleChatService:
                 # Ask for first missing slot
                 missing = slots.missing_slots()
                 if missing:
-                    return SLOT_PROMPTS.get(missing[0], f"Please provide the {missing[0]}.")
+                    dynamic_prompts = get_dynamic_slot_prompts()
+                    return dynamic_prompts.get(missing[0], f"Please provide the {missing[0]}.")
         
         elif intent == BookingIntent.CANCEL_BOOKING:
             return "I can help you cancel a booking. Please provide your booking reference or details."

@@ -86,7 +86,7 @@ AVAILABLE_LOCATIONS = [
 ]
 
 
-# Prompts for missing information
+# Prompts for missing information - will be dynamically updated
 SLOT_PROMPTS = {
     "location": "Which location would you like to book in?",
     "room_type": "What type of space do you need?",
@@ -95,3 +95,22 @@ SLOT_PROMPTS = {
     "time": "What time would you like to start?",
     "duration": "How long do you need the space?"
 }
+
+def get_dynamic_slot_prompts():
+    """Get slot prompts with dynamic suggestions from OfficeRND"""
+    try:
+        from app.services.officernd_service import officernd_service
+        
+        # Get dynamic location suggestions
+        location_suggestions = officernd_service.get_location_suggestions()
+        prompts = SLOT_PROMPTS.copy()
+        prompts["location"] = f"Which location would you like to book in? We have offices in: {location_suggestions}"
+        
+        # Get dynamic resource type suggestions
+        resource_suggestions = officernd_service.get_resource_type_suggestions()
+        prompts["room_type"] = f"What type of space do you need? Options: {resource_suggestions}"
+        
+        return prompts
+    except Exception as e:
+        # Fallback to static prompts if service fails
+        return SLOT_PROMPTS

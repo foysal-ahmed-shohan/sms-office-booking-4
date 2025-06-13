@@ -6,9 +6,10 @@ import logging
 from datetime import datetime, timedelta
 
 from app.database.models import User, ConversationState
-from app.schemas.booking_schema import BookingIntent, BookingSlots
+from app.schemas.booking_schema import BookingIntent, BookingSlots, get_dynamic_slot_prompts
 from app.services.chat.openai_service import OpenAIService
 from app.services.chat.simple_chat_service import SimpleChatService
+from app.services.officernd_service import officernd_service
 
 logger = logging.getLogger(__name__)
 
@@ -145,6 +146,27 @@ class ConversationManager:
         
         if new_info:
             logger.info(f"New information extracted: {new_info}")
+        
+        # Validate location against OfficeRND data
+        if updated_slots.location and (not current_slots.location or updated_slots.location != current_slots.location):
+            matched_location = officernd_service.match_location(updated_slots.location)
+            if matched_location:
+                updated_slots.location = matched_location.get('name', updated_slots.location)
+                logger.info(f"Matched location to OfficeRND: '{updated_slots.location}'")
+            else:
+                # Location not found, clear it and ask again
+                location_input = updated_slots.location
+                updated_slots.location = None
+                return f"Sorry, we don't have an office in '{location_input}'. {get_dynamic_slot_prompts()['location']}"
+        
+        # Validate room type against OfficeRND data
+        if updated_slots.room_type and (not current_slots.room_type or updated_slots.room_type != current_slots.room_type):
+            room_type_str = updated_slots.room_type.value.replace('_', ' ')
+            matched_type = officernd_service.match_resource_type(room_type_str)
+            if not matched_type:
+                # Room type not found, clear it and ask again
+                updated_slots.room_type = None
+                return f"Sorry, '{room_type_str}' is not available. {get_dynamic_slot_prompts()['room_type']}"
         
         # Update booking data - create new dict to ensure SQLAlchemy detects change
         conv_state.booking_data = updated_slots.dict(exclude_none=True)

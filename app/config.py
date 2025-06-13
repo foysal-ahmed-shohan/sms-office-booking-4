@@ -20,6 +20,17 @@ class Settings(BaseSettings):
     openai_api_key: str = Field(..., env="OPENAI_API_KEY")
     openai_model: str = Field(default="gpt-4", env="OPENAI_MODEL")
     
+    # OfficeRND Configuration
+    officernd_client_id: str = Field(..., env="OFFICERND_CLIENT_ID")
+    officernd_client_secret: str = Field(..., env="OFFICERND_CLIENT_SECRET")
+    officernd_base_url: str = Field(default="https://app.officernd.com/api/v2", env="OFFICERND_BASE_URL")
+    officernd_identity_url: str = Field(default="https://identity.officernd.com", env="OFFICERND_IDENTITY_URL")
+    officernd_org_slug: str = Field(..., env="OFFICERND_ORG_SLUG")
+    officernd_scope: str = Field(..., env="OFFICERND_SCOPE")
+    
+    # Redis Configuration
+    redis_url: str = Field(default="redis://localhost:6379/0", env="REDIS_URL")
+    
     # Server Configuration
     host: str = Field(default="0.0.0.0", env="HOST")
     port: int = Field(default=8000, env="PORT")

@@ -26,8 +26,11 @@ class BookingIntent(str, Enum):
 class BookingSlots(BaseModel):
     """Slots to be filled for a complete booking"""
     location: Optional[str] = Field(None, description="Location or city for the booking")
+    location_id: Optional[str] = Field(None, description="OfficeRND location ID")
     room_type: Optional[RoomType] = Field(None, description="Type of room needed")
     capacity: Optional[int] = Field(None, description="Number of people")
+    resource_id: Optional[str] = Field(None, description="Specific resource/room ID from OfficeRND")
+    resource_name: Optional[str] = Field(None, description="Name of the specific resource/room")
     start_date: Optional[str] = Field(None, description="Start date for booking")
     start_time: Optional[str] = Field(None, description="Start time for booking")
     end_date: Optional[str] = Field(None, description="End date for booking")
@@ -43,7 +46,7 @@ class BookingSlots(BaseModel):
         # Check new fields first, fallback to old ones
         has_start = (self.start_date and self.start_time) or (self.date and self.time)
         has_end = (self.end_date and self.end_time) or self.duration
-        required = [self.location, self.room_type, self.capacity, has_start, has_end]
+        required = [self.location, self.room_type, self.capacity, has_start, has_end, self.resource_id]
         return all(required)
     
     def missing_slots(self) -> List[str]:
@@ -55,6 +58,8 @@ class BookingSlots(BaseModel):
             missing.append("room_type")
         if not self.capacity:
             missing.append("capacity")
+        if not self.resource_id:
+            missing.append("resource")
         
         # Check for date/time info
         has_start = (self.start_date and self.start_time) or (self.date and self.time)
@@ -107,6 +112,7 @@ SLOT_PROMPTS = {
     "location": "Which location would you like to book in?",
     "room_type": "What type of space do you need?",
     "capacity": "How many people will be using the space?",
+    "resource": "Which specific room would you like?",
     "date": "What date do you need the room?",
     "time": "What time would you like to start?",
     "duration": "How long do you need the space?"

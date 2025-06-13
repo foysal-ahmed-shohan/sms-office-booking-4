@@ -128,15 +128,28 @@ class ConversationManager:
         if conv_state.state == 'awaiting_confirm':
             return self._handle_confirmation(conv_state, message)
         
-        # Get current booking slots
-        current_slots = BookingSlots(**(conv_state.booking_data or {}))
+        # Get current booking slots (excluding internal fields)
+        booking_data_clean = {k: v for k, v in (conv_state.booking_data or {}).items() if not k.startswith('_')}
+        current_slots = BookingSlots(**booking_data_clean)
+        
+        # Check if we're waiting for resource selection
+        waiting_for_resource = bool(conv_state.booking_data and '_available_resources' in conv_state.booking_data)
         
         # Log what we had before extraction
         before_extraction = current_slots.dict(exclude_none=True)
         logger.info(f"Slots before extraction: {before_extraction}")
         
-        # Extract information from message
-        updated_slots = self.chat_service.extract_booking_slots(message, current_slots)
+        # If we're waiting for resource selection, don't extract new slots
+        if waiting_for_resource:
+            updated_slots = current_slots
+            # Important: Don't try to extract booking slots when we're expecting a resource selection
+            logger.info("Waiting for resource selection - skipping slot extraction")
+        else:
+            # Create a copy for extraction to avoid modifying current_slots
+            slots_for_extraction = BookingSlots(**booking_data_clean)
+            
+            # Extract information from message
+            updated_slots = self.chat_service.extract_booking_slots(message, slots_for_extraction)
         
         # Log what we have after extraction
         after_extraction = updated_slots.dict(exclude_none=True)
@@ -151,12 +164,43 @@ class ConversationManager:
         if new_info:
             logger.info(f"New information extracted: {new_info}")
         
+        # Handle resource selection FIRST if user is responding to resource prompt
+        available_resources = conv_state.booking_data.get('_available_resources', []) if conv_state.booking_data else []
+        logger.info(f"Checking for resource selection. Available resources: {len(available_resources)}, current resource_id: {updated_slots.resource_id}")
+        
+        if available_resources and not updated_slots.resource_id:
+            logger.info(f"Attempting to match user message '{message}' to available resources")
+            # Try to match user's response to available resources
+            matched_resource = officernd_service.match_resource(message, available_resources)
+            if matched_resource:
+                updated_slots.resource_id = matched_resource.get('id')
+                updated_slots.resource_name = matched_resource.get('name')
+                logger.info(f"User selected resource: {updated_slots.resource_name} (ID: {updated_slots.resource_id})")
+                
+                # Clear the waiting flag
+                waiting_for_resource = False
+                
+                # Remove the available resources from booking data after selection
+                if '_available_resources' in conv_state.booking_data:
+                    del conv_state.booking_data['_available_resources']
+                
+                # Update booking data immediately
+                conv_state.booking_data = updated_slots.dict(exclude_none=True)
+                from sqlalchemy.orm.attributes import flag_modified
+                flag_modified(conv_state, 'booking_data')
+                self.db.commit()
+            else:
+                logger.warning(f"Could not match '{message}' to any available resource")
+                # Couldn't match resource, ask again
+                return "I couldn't find that option. Please choose by name or number from the list above."
+        
         # Validate location against OfficeRND data
         if updated_slots.location and (not current_slots.location or updated_slots.location != current_slots.location):
             matched_location = officernd_service.match_location(updated_slots.location)
             if matched_location:
                 updated_slots.location = matched_location.get('name', updated_slots.location)
-                logger.info(f"Matched location to OfficeRND: '{updated_slots.location}'")
+                updated_slots.location_id = matched_location.get('id')
+                logger.info(f"Matched location to OfficeRND: '{updated_slots.location}' (ID: {updated_slots.location_id})")
             else:
                 # Location not found, clear it and ask again
                 location_input = updated_slots.location
@@ -172,12 +216,108 @@ class ConversationManager:
                 updated_slots.room_type = None
                 return f"Sorry, '{room_type_str}' is not available. {get_dynamic_slot_prompts()['room_type']}"
         
+        # Check if we have location and room type but no resource yet
+        if (updated_slots.location_id and updated_slots.room_type and 
+            not updated_slots.resource_id):
+            
+            # Need to check if user provided a resource name in the message
+            resource_matched = False
+            
+            # Get available resources for this location and room type
+            room_type_map = {
+                'meeting_room': 'meeting_room',
+                'hot_desk': 'hotdesk',
+                'private_office': 'office',
+                'phone_booth': 'phone_booth',
+                'conference_room': 'meeting_room',  # Map conference to meeting room
+                'event_space': 'event_space'
+            }
+            
+            officernd_room_type = room_type_map.get(updated_slots.room_type.value, updated_slots.room_type.value)
+            resources = officernd_service.get_resources(
+                room_type=officernd_room_type,
+                location_id=updated_slots.location_id
+            )
+            
+            logger.info(f"Retrieved {len(resources)} resources from OfficeRND")
+            
+            if resources:
+                # For now, don't filter by type - just show all resources
+                # The API might not return consistent type values
+                filtered_resources = resources
+                logger.info(f"Showing all {len(filtered_resources)} resources (type filtering disabled)")
+                
+                if filtered_resources:
+                    # Store resources in booking data for persistence
+                    conv_state.booking_data = conv_state.booking_data or {}
+                    conv_state.booking_data['_available_resources'] = filtered_resources
+                    
+                    # Don't try to auto-match resources from the initial message
+                    # Always show the options to the user
+                    resource_matched = False
+                    
+                    # Always ask user to choose from available resources
+                    if not resource_matched:
+                        # Format resources with images
+                        room_type_display = updated_slots.room_type.value.replace('_', ' ') if updated_slots.room_type else "space"
+                        resource_prompt = f"Great! Now please choose a specific {room_type_display} at {updated_slots.location}:\n\n"
+                        
+                        for i, res in enumerate(filtered_resources[:5], 1):  # Limit to 5 options
+                            name = res.get('name', 'Unknown')
+                            desc = res.get('description', '')
+                            size = res.get('size', 0)
+                            images = res.get('images', [])
+                            
+                            resource_prompt += f"{i}. {name}"
+                            if desc:
+                                resource_prompt += f" - {desc}"
+                            if size > 0:
+                                resource_prompt += f" (capacity: {size})"
+                            
+                            # Add image URL if available
+                            if images and len(images) > 0:
+                                # Convert relative URL to full URL
+                                image_url = images[0]
+                                if image_url.startswith('//'):
+                                    image_url = f"https:{image_url}"
+                                resource_prompt += f"\n   View: {image_url}"
+                            
+                            resource_prompt += "\n\n"
+                        
+                        resource_prompt += "Please tell me which one you'd like by name or number."
+                        
+                        # Store the prompt for later use if needed
+                        self._last_resource_prompt = resource_prompt
+                        
+                        # Save the current state before returning
+                        conv_state.booking_data = updated_slots.dict(exclude_none=True)
+                        conv_state.booking_data['_available_resources'] = filtered_resources
+                        
+                        # Mark as modified
+                        from sqlalchemy.orm.attributes import flag_modified
+                        flag_modified(conv_state, 'booking_data')
+                        self.db.commit()
+                        
+                        # Don't update booking data yet since we're waiting for resource selection
+                        return resource_prompt
+        
+        # Before updating booking data, check if we only need resource selection
+        missing_before_update = updated_slots.missing_slots()
+        
         # Update booking data - create new dict to ensure SQLAlchemy detects change
         conv_state.booking_data = updated_slots.dict(exclude_none=True)
         
         # Mark as modified explicitly
         from sqlalchemy.orm.attributes import flag_modified
         flag_modified(conv_state, 'booking_data')
+        
+        # If we only have resource missing and we just showed the resource prompt, return it
+        # BUT only if we didn't just select a resource and we're not waiting for resource selection
+        if (missing_before_update == ['resource'] and 
+            hasattr(self, '_last_resource_prompt') and 
+            not updated_slots.resource_id and  # Only show prompt if no resource selected
+            '_available_resources' not in conv_state.booking_data):  # And not already showing resources
+            return self._last_resource_prompt
         
         # Generate response based on what's missing
         response = self.chat_service.generate_response(
@@ -217,16 +357,24 @@ class ConversationManager:
             response = f"Great! Your OfficeRND booking has been confirmed!\n\n"
             
             # Add booking details
-            if slots.room_type:
+            if slots.resource_name:
+                response += f"• Room: {slots.resource_name} at {slots.location}\n"
+            elif slots.room_type:
                 room_type_str = slots.room_type.value.replace('_', ' ').title()
                 response += f"• Space: {room_type_str} at {slots.location}\n"
+            
             if slots.capacity:
                 response += f"• Capacity: {slots.capacity} {'person' if slots.capacity == 1 else 'people'}\n"
             if slots.start_date and slots.start_time and slots.end_time:
                 response += f"• Date & Time: {slots.start_date} from {slots.start_time} to {slots.end_time}\n"
             
-            response += f"\nYour booking ID is: {booking_id}\n\n"
-            response += "Thank you for using OfficeRND booking service!"
+            response += f"\nYour booking ID is: {booking_id}\n"
+            
+            # Add resource ID as requested
+            if slots.resource_id:
+                response += f"Resource ID: {slots.resource_id}\n"
+            
+            response += "\nThank you for using OfficeRND booking service!"
             
             # Reset conversation for next booking
             conv_state.booking_data = {}

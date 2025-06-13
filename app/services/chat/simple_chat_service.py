@@ -54,33 +54,37 @@ class SimpleChatService:
         message_lower = message.lower()
         
         # Extract location - Try dynamic OfficeRND data first
+        location_found = False
         try:
             from app.services.officernd_service import officernd_service
             
             # Check if any word in the message matches a location
             words = message.split()
             for word in words:
-                if len(word) >= 3:  # Skip very short words
-                    match = officernd_service.match_location(word)
+                # Clean word by removing common punctuation
+                clean_word = word.strip(',.!?;:')
+                if len(clean_word) >= 3:  # Skip very short words
+                    match = officernd_service.match_location(clean_word)
                     if match:
                         current_slots.location = match.get('name')
-                        logger.info(f"Found OfficeRND location match: {current_slots.location}")
+                        current_slots.location_id = match.get('id')
+                        logger.info(f"Found OfficeRND location match: {current_slots.location} (ID: {current_slots.location_id})")
                         location_found = True
                         break
         except Exception as e:
             logger.warning(f"Failed to use OfficeRND service: {str(e)}")
         
-        # Fallback to static location matching
-        locations_lower = [loc.lower() for loc in AVAILABLE_LOCATIONS]
-        location_found = False
-        
-        # First try exact matches
-        for i, loc in enumerate(locations_lower):
-            if loc in message_lower:
-                current_slots.location = AVAILABLE_LOCATIONS[i]
-                location_found = True
-                logger.info(f"Found exact location match: {AVAILABLE_LOCATIONS[i]}")
-                break
+        # Fallback to static location matching if not found
+        if not location_found:
+            locations_lower = [loc.lower() for loc in AVAILABLE_LOCATIONS]
+            
+            # First try exact matches
+            for i, loc in enumerate(locations_lower):
+                if loc in message_lower:
+                    current_slots.location = AVAILABLE_LOCATIONS[i]
+                    location_found = True
+                    logger.info(f"Found exact location match: {AVAILABLE_LOCATIONS[i]}")
+                    break
         
         # Check for common misspellings and variations
         if not location_found:
@@ -312,7 +316,10 @@ class SimpleChatService:
                 # Build confirmation message
                 response = "Perfect! Let me confirm your booking details:\n\n"
                 
-                if slots.room_type:
+                # Show specific resource if selected, otherwise show room type
+                if slots.resource_name:
+                    response += f"• Room: {slots.resource_name} "
+                elif slots.room_type:
                     room_type_str = slots.room_type.value.replace('_', ' ').title()
                     response += f"• Space: {room_type_str} "
                 
@@ -362,35 +369,42 @@ class SimpleChatService:
         try:
             from app.services.officernd_service import officernd_service
             
+            # Filter out 'resource' from missing list for initial prompts
+            # Resource selection happens after location and room type are known
+            missing_for_prompt = [m for m in missing if m != 'resource']
+            
             # Start with a friendly opening based on what's missing
-            if len(missing) >= 4:
+            if len(missing_for_prompt) >= 4:
                 prompt = "I'd be happy to help you book a space! To find the perfect spot for you, could you tell me:\n\n"
-            elif len(missing) == 3:
+            elif len(missing_for_prompt) == 3:
                 prompt = "Great! I just need a few more details:\n\n"
-            elif len(missing) == 2:
+            elif len(missing_for_prompt) == 2:
                 prompt = "Almost there! I just need:\n\n"
-            else:
+            elif len(missing_for_prompt) == 1:
                 prompt = "Perfect! One last thing:\n\n"
+            else:
+                # All basic info collected, resource will be asked separately
+                return ""
             
             # Build conversational questions
             questions = []
             
-            if "location" in missing:
+            if "location" in missing_for_prompt:
                 locations = officernd_service.get_location_suggestions()
                 questions.append(f"Which office location works best for you? We have spaces in {locations}")
             
-            if "room_type" in missing:
+            if "room_type" in missing_for_prompt:
                 room_types = officernd_service.get_resource_type_suggestions()
                 questions.append(f"What type of space do you need? We offer {room_types}")
             
-            if "capacity" in missing:
+            if "capacity" in missing_for_prompt:
                 questions.append("How many people will be joining?")
             
-            if "datetime" in missing:
+            if "datetime" in missing_for_prompt:
                 questions.append("When do you need the space? Please include both start and end times (e.g., 'Dec 5, 2025 from 2pm to 4pm' or 'tomorrow 1pm-3pm')")
-            elif "start_time" in missing:
+            elif "start_time" in missing_for_prompt:
                 questions.append("What's your start date and time?")
-            elif "end_time" in missing:
+            elif "end_time" in missing_for_prompt:
                 questions.append("Until what time do you need the space?")
             
             # Join questions naturally
@@ -402,9 +416,9 @@ class SimpleChatService:
                 prompt += "\n".join(f"- {q}" for q in questions)
             
             # Add a friendly closing with better example
-            if len(missing) >= 3:
+            if len(missing_for_prompt) >= 3:
                 prompt += "\n\nFeel free to tell me everything at once, like 'Atlanta, meeting room for 5 people tomorrow 2pm-4pm'"
-            elif "datetime" in missing or "end_time" in missing:
+            elif "datetime" in missing_for_prompt or "end_time" in missing_for_prompt:
                 prompt += "\n\nExample: 'tomorrow from 2pm to 4pm' or 'Dec 5, 2025 1pm-3pm'"
             
             return prompt
@@ -412,5 +426,5 @@ class SimpleChatService:
         except Exception as e:
             # Fallback to simple but friendly prompt
             logger.warning(f"Failed to build dynamic prompt: {str(e)}")
-            missing_formatted = [m.replace('_', ' ') for m in missing]
+            missing_formatted = [m.replace('_', ' ') for m in missing if m != 'resource']
             return f"I'd be happy to help! Could you let me know the {', '.join(missing_formatted)}?"

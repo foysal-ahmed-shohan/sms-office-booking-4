@@ -292,7 +292,9 @@ class OpenAIService:
             response = "Perfect! Let me confirm your booking details:\n\n"
             
             # Format the details in a friendly way
-            if slots.room_type:
+            if slots.resource_name:
+                response += f"• Room: {slots.resource_name} "
+            elif slots.room_type:
                 room_type_str = slots.room_type.value.replace('_', ' ').title()
                 response += f"• Space: {room_type_str} "
             
@@ -387,35 +389,42 @@ class OpenAIService:
         try:
             from app.services.officernd_service import officernd_service
             
+            # Filter out 'resource' from missing list for initial prompts
+            # Resource selection happens after location and room type are known
+            missing_for_prompt = [m for m in missing if m != 'resource']
+            
             # Start with a friendly opening based on what's missing
-            if len(missing) >= 4:
+            if len(missing_for_prompt) >= 4:
                 prompt = "I'd be happy to help you book a space! To find the perfect spot for you, could you tell me:\n\n"
-            elif len(missing) == 3:
+            elif len(missing_for_prompt) == 3:
                 prompt = "Great! I just need a few more details:\n\n"
-            elif len(missing) == 2:
+            elif len(missing_for_prompt) == 2:
                 prompt = "Almost there! I just need:\n\n"
-            else:
+            elif len(missing_for_prompt) == 1:
                 prompt = "Perfect! One last thing:\n\n"
+            else:
+                # All basic info collected, resource will be asked separately
+                return ""
             
             # Build conversational questions
             questions = []
             
-            if "location" in missing:
+            if "location" in missing_for_prompt:
                 locations = officernd_service.get_location_suggestions()
                 questions.append(f"Which office location works best for you? We have spaces in {locations}")
             
-            if "room_type" in missing:
+            if "room_type" in missing_for_prompt:
                 room_types = officernd_service.get_resource_type_suggestions()
                 questions.append(f"What type of space do you need? We offer {room_types}")
             
-            if "capacity" in missing:
+            if "capacity" in missing_for_prompt:
                 questions.append("How many people will be joining?")
             
-            if "datetime" in missing:
+            if "datetime" in missing_for_prompt:
                 questions.append("When do you need the space? Please include both start and end times (e.g., 'Dec 5, 2025 from 2pm to 4pm' or 'tomorrow 1pm-3pm')")
-            elif "start_time" in missing:
+            elif "start_time" in missing_for_prompt:
                 questions.append("What's your start date and time?")
-            elif "end_time" in missing:
+            elif "end_time" in missing_for_prompt:
                 questions.append("Until what time do you need the space?")
             
             # Join questions naturally
@@ -427,9 +436,9 @@ class OpenAIService:
                 prompt += "\n".join(f"- {q}" for q in questions)
             
             # Add a friendly closing with better example
-            if len(missing) >= 3:
+            if len(missing_for_prompt) >= 3:
                 prompt += "\n\nFeel free to tell me everything at once, like 'Atlanta, meeting room for 5 people tomorrow 2pm-4pm'"
-            elif "datetime" in missing or "end_time" in missing:
+            elif "datetime" in missing_for_prompt or "end_time" in missing_for_prompt:
                 prompt += "\n\nExample: 'tomorrow from 2pm to 4pm' or 'Dec 5, 2025 1pm-3pm'"
             
             return prompt
@@ -437,5 +446,5 @@ class OpenAIService:
         except Exception as e:
             # Fallback to simple but friendly prompt
             logger.warning(f"Failed to build dynamic prompt: {str(e)}")
-            missing_formatted = [m.replace('_', ' ') for m in missing]
+            missing_formatted = [m.replace('_', ' ') for m in missing if m != 'resource']
             return f"I'd be happy to help! Could you let me know the {', '.join(missing_formatted)}?"

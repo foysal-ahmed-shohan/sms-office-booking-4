@@ -348,6 +348,127 @@ class OfficeRNDService:
             return titles[0]
         else:
             return "our available spaces"
+    
+    def get_resources(self, room_type: Optional[str] = None, location_id: Optional[str] = None) -> List[Dict]:
+        """Get available resources (specific rooms/desks) filtered by type and location"""
+        # Build cache key
+        cache_key = f"officernd_resources_{room_type or 'all'}_{location_id or 'all'}"
+        
+        # Check cache first
+        cached_resources = self._get_cached_data(cache_key, ttl=1800)  # Cache for 30 minutes
+        if cached_resources:
+            logger.debug(f"Returning cached resources for {room_type} at {location_id}")
+            return cached_resources
+        
+        token = self._get_access_token()
+        if not token:
+            logger.error("No access token available")
+            return []
+        
+        try:
+            url = f"{self.base_url}/organizations/{self.org_slug}/resources"
+            headers = {
+                'accept': 'application/json',
+                'authorization': f'Bearer {token}'
+            }
+            
+            # Add query parameters if provided
+            params = {}
+            # Don't filter by type for now - API might not support it
+            # if room_type:
+            #     params['type'] = room_type
+            if location_id:
+                params['location'] = location_id
+            
+            response = requests.get(url, headers=headers, params=params)
+            response.raise_for_status()
+            
+            data = response.json()
+            resources = data.get('results', [])
+            
+            # Process resources to extract relevant info
+            processed_resources = []
+            for res in resources:
+                # Only include available resources
+                availability = res.get('availability', {})
+                if availability.get('startDate') and not availability.get('endDate'):
+                    processed_resources.append({
+                        'id': res.get('_id'),
+                        'name': res.get('name'),
+                        'description': res.get('description'),
+                        'type': res.get('type'),
+                        'location_id': res.get('location'),
+                        'size': res.get('size', 0),
+                        'price': res.get('price', 0),
+                        'images': res.get('images', [])
+                    })
+            
+            # Cache the results
+            self._set_cached_data(cache_key, processed_resources, ttl=1800)
+            
+            logger.info(f"Retrieved {len(processed_resources)} resources for type={room_type}, location={location_id}")
+            return processed_resources
+            
+        except Exception as e:
+            logger.error(f"Failed to get resources: {str(e)}")
+            return []
+    
+    def format_resource_suggestions(self, resources: List[Dict]) -> str:
+        """Format resources into a user-friendly suggestion string"""
+        if not resources:
+            return "No specific rooms available at this time."
+        
+        suggestions = []
+        for res in resources[:5]:  # Limit to 5 suggestions
+            name = res.get('name', 'Unknown')
+            desc = res.get('description', '')
+            size = res.get('size', 0)
+            
+            # Format each resource
+            if desc:
+                suggestion = f"• {name} - {desc}"
+            else:
+                suggestion = f"• {name}"
+            
+            if size > 0:
+                suggestion += f" (capacity: {size})"
+            
+            suggestions.append(suggestion)
+        
+        return "\n".join(suggestions)
+    
+    def match_resource(self, user_input: str, available_resources: List[Dict]) -> Optional[Dict]:
+        """Match user input to available resources"""
+        if not available_resources:
+            return None
+        
+        user_input_lower = user_input.lower().strip()
+        
+        # First try exact name match (case insensitive)
+        for res in available_resources:
+            if res.get('name', '').lower() == user_input_lower:
+                return res
+        
+        # Then try partial match
+        for res in available_resources:
+            res_name_lower = res.get('name', '').lower()
+            if user_input_lower in res_name_lower or res_name_lower in user_input_lower:
+                return res
+        
+        # Try matching by number if user says "1", "2", etc.
+        if user_input_lower.isdigit():
+            index = int(user_input_lower) - 1
+            if 0 <= index < len(available_resources):
+                return available_resources[index]
+        
+        # Try fuzzy matching on key words
+        words = user_input_lower.split()
+        for res in available_resources:
+            res_name_words = res.get('name', '').lower().split()
+            if any(word in res_name_words for word in words):
+                return res
+        
+        return None
 
 
 # Create singleton instance

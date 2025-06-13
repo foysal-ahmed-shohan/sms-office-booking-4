@@ -5,6 +5,7 @@ import logging
 from app.config import settings
 from app.api.endpoints import router
 from app.utils.logging import setup_logging
+from app.database.connection import init_db, check_db_connection
 
 
 # Setup logging
@@ -42,6 +43,19 @@ async def startup_event():
     logger.info(f"SMS Sending: {'Enabled' if settings.enable_sms_sending else 'Disabled'}")
     logger.info(f"Signature Validation: {'Enabled' if settings.validate_twilio_signature else 'Disabled'}")
     logger.info(f"Twilio Phone: {settings.twilio_phone_number}")
+    
+    # Initialize database
+    try:
+        if check_db_connection():
+            logger.info("Database connection successful")
+            init_db()
+            logger.info("Database initialized")
+        else:
+            logger.error("Database connection failed - service will run without database")
+    except Exception as e:
+        logger.error(f"Database initialization error: {str(e)}")
+        logger.warning("Service will continue without database functionality")
+    
     logger.info("=" * 50)
 
 

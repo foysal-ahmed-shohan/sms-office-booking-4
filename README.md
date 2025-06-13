@@ -17,16 +17,36 @@ A FastAPI-based SMS service that receives messages via Twilio webhooks and sends
 pip install -r requirements.txt
 ```
 
-2. Create a `.env` file with your Twilio credentials:
+2. Set up PostgreSQL database:
+```bash
+# Create database (as postgres user)
+psql -U postgres -f init_db.sql
+
+# Or manually:
+createdb sms_service_db
 ```
+
+3. Create a `.env` file with your credentials:
+```
+# Database
+DATABASE_URL=postgresql://username:password@localhost:5432/sms_service_db
+
+# Twilio
 TWILIO_ACCOUNT_SID=your_account_sid
 TWILIO_AUTH_TOKEN=your_auth_token
 TWILIO_PHONE_NUMBER=+1234567890
+
+# Features
 ENABLE_SMS_SENDING=false
 VALIDATE_TWILIO_SIGNATURE=true
 ```
 
-3. Run the server:
+4. Initialize database:
+```bash
+python manage_db.py init
+```
+
+5. Run the server:
 ```bash
 python run.py
 # or

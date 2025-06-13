@@ -26,6 +26,12 @@ class Settings(BaseSettings):
     api_version: str = "1.0.0"
     api_description: str = "A service that receives SMS via Twilio and sends automated replies"
     
+    # Database Configuration
+    database_url: str = Field(..., env="DATABASE_URL")
+    db_echo: bool = Field(default=False, env="DB_ECHO")  # SQL query logging
+    db_pool_size: int = Field(default=5, env="DB_POOL_SIZE")
+    db_max_overflow: int = Field(default=10, env="DB_MAX_OVERFLOW")
+    
     # Logging
     log_level: str = Field(default="INFO", env="LOG_LEVEL")
     log_file_path: str = Field(default="logs/app.log", env="LOG_FILE_PATH")

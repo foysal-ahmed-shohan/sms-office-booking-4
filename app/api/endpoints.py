@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Form, Request, Response, HTTPException, Depends
 from twilio.twiml.messaging_response import MessagingResponse
+from sqlalchemy.orm import Session
 from datetime import datetime
 import pytz
 import logging
@@ -15,6 +16,10 @@ from app.schemas import (
 )
 from app.services.twilio_service import twilio_service
 from app.config import settings
+from app.database.connection import get_db
+from app.repositories.user_repository import UserRepository
+from app.repositories.sms_repository import SMSRepository
+from app.database.models import User, SMSMessage
 
 
 logger = logging.getLogger(__name__)
@@ -34,6 +39,7 @@ def get_request_params(request: Request) -> Dict[str, str]:
 @router.post("/sms/webhook")
 async def receive_sms(
     request: Request,
+    db: Session = Depends(get_db),
     From: str = Form(...),
     To: str = Form(...),
     Body: str = Form(...),
@@ -106,24 +112,83 @@ async def receive_sms(
             sms_sending_enabled=settings.enable_sms_sending
         )
         
+        # Initialize repositories
+        user_repo = UserRepository(db)
+        sms_repo = SMSRepository(db)
+        
+        # Store user in database
+        try:
+            user = user_repo.create_or_update(
+                phone_number=sms_data.From,
+                twilio_phone_number=sms_data.To
+            )
+            logger.info(f"User stored/updated in database: {user.id}")
+            
+            # Store inbound SMS message
+            inbound_sms = sms_repo.create_message(
+                user_id=user.id,
+                direction='inbound',
+                from_number=sms_data.From,
+                to_number=sms_data.To,
+                message_body=sms_data.Body,
+                message_sid=sms_data.MessageSid,
+                account_sid=sms_data.AccountSid,
+                messaging_service_sid=sms_data.MessagingServiceSid,
+                num_media=int(sms_data.NumMedia or 0)
+            )
+            logger.info(f"Inbound SMS stored in database: {inbound_sms.id}")
+            
+        except Exception as e:
+            logger.error(f"Database error storing SMS data: {str(e)}")
+            # Continue processing even if database fails
+        
         # Check if request expects JSON response (from Postman)
         user_agent = request.headers.get("User-Agent", "")
         is_postman = "Postman" in user_agent or request.headers.get("Accept", "").startswith("application/json")
         
-        # Send SMS if enabled
-        if settings.enable_sms_sending:
-            success, message_sid, error = twilio_service.send_sms(
-                to_number=sms_data.From,
-                message=reply_message
-            )
-            
-            if success:
-                reply_data.sms_sent = True
-                reply_data.message_sid = message_sid
+        # Always store the reply message in database (regardless of SMS sending)
+        outbound_sms = None
+        try:
+            # Determine status based on SMS sending
+            if settings.enable_sms_sending:
+                success, message_sid, error = twilio_service.send_sms(
+                    to_number=sms_data.From,
+                    message=reply_message
+                )
+                
+                if success:
+                    reply_data.sms_sent = True
+                    reply_data.message_sid = message_sid
+                    status = 'sent'
+                    error_msg = None
+                else:
+                    reply_data.error = error
+                    status = 'failed'
+                    error_msg = error
+                    message_sid = None
             else:
-                reply_data.error = error
-        else:
-            reply_data.reason = "SMS sending disabled in configuration"
+                # SMS sending disabled - still store the reply
+                reply_data.reason = "SMS sending disabled in configuration"
+                status = 'draft'  # Not sent but prepared
+                message_sid = None
+                error_msg = None
+            
+            # Store outbound SMS in database
+            outbound_sms = sms_repo.create_message(
+                user_id=user.id,
+                direction='outbound',
+                from_number=sms_data.To,
+                to_number=sms_data.From,
+                message_body=reply_message,
+                message_sid=message_sid,
+                account_sid=sms_data.AccountSid,
+                status=status,
+                error_message=error_msg
+            )
+            logger.info(f"Outbound SMS stored in database: {outbound_sms.id} (status: {status})")
+            
+        except Exception as e:
+            logger.error(f"Database error storing outbound SMS: {str(e)}")
         
         # Prepare response
         response_data = SMSWebhookResponse(
@@ -205,12 +270,24 @@ async def test_config():
 
 
 @router.get("/health", response_model=HealthCheckResponse)
-async def health_check():
+async def health_check(db: Session = Depends(get_db)):
     """Health check endpoint"""
+    # Check database connection
+    db_status = "healthy"
+    try:
+        from sqlalchemy import text
+        db.execute(text("SELECT 1"))
+        db_count = db.query(User).count()
+        logger.debug(f"Database health check: {db_count} users")
+    except Exception as e:
+        db_status = f"unhealthy: {str(e)}"
+        logger.error(f"Database health check failed: {str(e)}")
+    
     return HealthCheckResponse(
-        status="healthy",
+        status="healthy" if db_status == "healthy" else "degraded",
         service="SMS Reply Service",
-        version=settings.api_version
+        version=settings.api_version,
+        database_status=db_status
     )
 
 

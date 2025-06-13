@@ -114,3 +114,4 @@ class HealthCheckResponse(BaseModel):
     service: str
     timestamp: str = Field(default_factory=lambda: datetime.utcnow().isoformat())
     version: str = "1.0.0"
+    database_status: Optional[str] = None

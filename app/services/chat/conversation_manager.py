@@ -152,6 +152,8 @@ class ConversationManager:
         # Log what we had before extraction
         before_extraction = current_slots.dict(exclude_none=True)
         logger.info(f"Slots before extraction: {before_extraction}")
+        logger.info(f"Waiting for resource selection: {waiting_for_resource}")
+        logger.info(f"Message: '{message}'")
         
         # If we're waiting for resource selection, don't extract new slots
         if waiting_for_resource:
@@ -163,7 +165,12 @@ class ConversationManager:
             slots_for_extraction = BookingSlots(**booking_data_clean)
             
             # Extract information from message
-            updated_slots = self.chat_service.extract_booking_slots(message, slots_for_extraction)
+            try:
+                updated_slots = self.chat_service.extract_booking_slots(message, slots_for_extraction)
+            except Exception as e:
+                logger.error(f"Error extracting booking slots: {str(e)}")
+                # If extraction fails, keep current slots
+                updated_slots = current_slots
         
         # Log what we have after extraction
         after_extraction = updated_slots.dict(exclude_none=True)

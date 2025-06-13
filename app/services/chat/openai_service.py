@@ -236,8 +236,15 @@ class OpenAIService:
                     current_slots.start_time = extracted["time"]
                 logger.info(f"Extracted time: {extracted['time']}")
             if "duration" in extracted:
-                current_slots.duration = extracted["duration"]
-                logger.info(f"Extracted duration: {extracted['duration']}")
+                # Ensure duration is a string
+                duration_value = extracted["duration"]
+                if isinstance(duration_value, (int, float)):
+                    # Convert number to string with "hour" or "hours"
+                    hours = int(duration_value)
+                    current_slots.duration = f"{hours} {'hour' if hours == 1 else 'hours'}"
+                else:
+                    current_slots.duration = str(duration_value)
+                logger.info(f"Extracted duration: {current_slots.duration}")
                 
             return current_slots
             

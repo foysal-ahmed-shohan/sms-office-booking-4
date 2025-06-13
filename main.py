@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Form, Response, HTTPException
+from fastapi import FastAPI, Form, Response, HTTPException, Request
 from twilio.rest import Client
 from twilio.twiml.messaging_response import MessagingResponse
 from twilio.base.exceptions import TwilioException
@@ -31,6 +31,7 @@ app = FastAPI(
 account_sid = os.getenv('TWILIO_ACCOUNT_SID')
 auth_token = os.getenv('TWILIO_AUTH_TOKEN')
 twilio_phone_number = os.getenv('TWILIO_PHONE_NUMBER')
+enable_sms_sending = os.getenv('ENABLE_SMS_SENDING', 'false').lower() == 'true'
 
 # Validate configuration
 if not all([account_sid, auth_token, twilio_phone_number]):
@@ -41,6 +42,7 @@ if not all([account_sid, auth_token, twilio_phone_number]):
 else:
     logger.info("Twilio configuration loaded successfully")
     logger.info(f"Twilio phone number: {twilio_phone_number}")
+    logger.info(f"SMS sending enabled: {enable_sms_sending}")
 
 try:
     client = Client(account_sid, auth_token)
@@ -52,6 +54,7 @@ except Exception as e:
 
 @app.post("/sms/webhook")
 async def receive_sms(
+    request: Request,
     From: str = Form(...),
     Body: str = Form(...),
     MessageSid: str = Form(None),
@@ -77,8 +80,30 @@ async def receive_sms(
         # Create reply message
         reply_message = f"Hello! I received your message: '{Body}' from phone number: {From} at {current_time}"
         
-        # Option 1: Send SMS directly via Twilio API (choose this OR TwiML, not both)
-        if client and twilio_phone_number:
+        # Prepare response data for testing
+        response_data = {
+            "status": "success",
+            "received": {
+                "from": From,
+                "to": To,
+                "body": Body,
+                "message_sid": MessageSid,
+                "account_sid": AccountSid
+            },
+            "reply": {
+                "message": reply_message,
+                "timestamp": current_time,
+                "sms_sent": False,
+                "sms_sending_enabled": enable_sms_sending
+            }
+        }
+        
+        # Check if request is from Postman (JSON response expected)
+        user_agent = request.headers.get("User-Agent", "")
+        is_postman = "Postman" in user_agent or request.headers.get("Accept", "").startswith("application/json")
+        
+        # Send SMS if enabled
+        if enable_sms_sending and client and twilio_phone_number:
             try:
                 message = client.messages.create(
                     body=reply_message,
@@ -86,30 +111,34 @@ async def receive_sms(
                     to=From
                 )
                 logger.info(f"SMS sent successfully via API. Message SID: {message.sid}")
-                
-                # Return empty TwiML response (no message) to acknowledge webhook
-                resp = MessagingResponse()
-                return Response(content=str(resp), media_type="application/xml")
+                response_data["reply"]["sms_sent"] = True
+                response_data["reply"]["message_sid"] = message.sid
                 
             except TwilioException as e:
                 logger.error(f"Failed to send SMS via Twilio API: {str(e)}")
-                # Fallback to TwiML response if API fails
-                resp = MessagingResponse()
-                resp.message(reply_message)
-                return Response(content=str(resp), media_type="application/xml")
-                
+                response_data["error"] = str(e)
             except Exception as e:
                 logger.error(f"Unexpected error sending SMS: {str(e)}")
                 logger.error(traceback.format_exc())
-                # Fallback to TwiML response
-                resp = MessagingResponse()
-                resp.message(reply_message)
-                return Response(content=str(resp), media_type="application/xml")
+                response_data["error"] = str(e)
         else:
-            logger.warning("Cannot send direct SMS - Twilio client not initialized or phone number missing")
-            # Use TwiML response as fallback
+            if not enable_sms_sending:
+                logger.info("SMS sending is disabled. Reply message prepared but not sent.")
+                response_data["reply"]["reason"] = "SMS sending disabled in configuration"
+            else:
+                logger.warning("Cannot send SMS - Twilio client not initialized or phone number missing")
+                response_data["reply"]["reason"] = "Twilio not properly configured"
+        
+        # Return appropriate response based on client
+        if is_postman:
+            # Return JSON for Postman testing
+            return response_data
+        else:
+            # Return TwiML for Twilio webhook
             resp = MessagingResponse()
-            resp.message(reply_message)
+            # Only add message to TwiML if SMS wasn't sent via API
+            if not (enable_sms_sending and response_data["reply"]["sms_sent"]):
+                resp.message(reply_message)
             return Response(content=str(resp), media_type="application/xml")
         
     except Exception as e:
@@ -143,10 +172,12 @@ async def test_config():
         "twilio_auth_token": "Set" if auth_token else "Missing",
         "twilio_phone_number": twilio_phone_number if twilio_phone_number else "Missing",
         "twilio_client_initialized": client is not None,
+        "sms_sending_enabled": enable_sms_sending,
         "environment_variables": {
             "TWILIO_ACCOUNT_SID": account_sid[:10] + "..." if account_sid and len(account_sid) > 10 else account_sid,
             "TWILIO_AUTH_TOKEN": "***" if auth_token else None,
-            "TWILIO_PHONE_NUMBER": twilio_phone_number
+            "TWILIO_PHONE_NUMBER": twilio_phone_number,
+            "ENABLE_SMS_SENDING": str(enable_sms_sending)
         }
     }
     

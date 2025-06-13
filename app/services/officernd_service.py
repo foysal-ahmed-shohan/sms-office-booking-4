@@ -263,33 +263,57 @@ class OfficeRNDService:
         
         user_input_lower = user_input.lower().strip()
         
-        # Mapping of common terms to resource types
+        # Log available resource types for debugging
+        logger.debug(f"Matching '{user_input}' against resource types: {[rt.get('title') for rt in resource_types]}")
+        
+        # Normalize variations - handle spaces, hyphens, underscores
+        normalized_input = user_input_lower.replace('_', ' ').replace('-', ' ')
+        # Also try without spaces
+        compact_input = user_input_lower.replace(' ', '').replace('_', '').replace('-', '')
+        
+        # First try exact match (case insensitive)
+        for rt in resource_types:
+            title_lower = rt.get('title', '').lower()
+            title_compact = title_lower.replace(' ', '').replace('-', '')
+            
+            # Check various forms
+            if (title_lower == user_input_lower or 
+                title_lower == normalized_input or
+                title_compact == compact_input):
+                logger.info(f"Exact match found: '{user_input}' -> '{rt.get('title')}'")
+                return rt
+        
+        # Mapping of common terms to resource types (expanded)
         type_mappings = {
             'meeting room': ['meeting', 'conference'],
             'conference room': ['conference', 'meeting'],
-            'desk': ['desk', 'hot desk', 'dedicated desk'],
+            'desk': ['desk', 'hot desk', 'hotdesk', 'dedicated desk'],
+            'hot desk': ['hotdesk', 'hot desk'],
+            'hotdesk': ['hotdesk', 'hot desk'],
             'office': ['office', 'private office'],
             'phone booth': ['phone', 'booth', 'call']
         }
         
-        # First try exact match
-        for rt in resource_types:
-            if rt.get('title', '').lower() == user_input_lower:
-                return rt
-        
-        # Then try mapping matches
+        # Try mapping matches
         for key, values in type_mappings.items():
-            if user_input_lower in key:
+            if user_input_lower == key or normalized_input == key:
                 for rt in resource_types:
                     title_lower = rt.get('title', '').lower()
                     if any(v in title_lower for v in values):
+                        logger.info(f"Mapping match found: '{user_input}' -> '{rt.get('title')}'")
                         return rt
         
-        # Finally try partial match
+        # Try partial match (contains)
         for rt in resource_types:
-            if user_input_lower in rt.get('title', '').lower():
+            title_lower = rt.get('title', '').lower()
+            if (user_input_lower in title_lower or 
+                normalized_input in title_lower or
+                title_lower in user_input_lower or
+                title_lower in normalized_input):
+                logger.info(f"Partial match found: '{user_input}' -> '{rt.get('title')}'")
                 return rt
         
+        logger.warning(f"No match found for resource type: '{user_input}'")
         return None
     
     def get_location_suggestions(self, limit: int = 5) -> str:

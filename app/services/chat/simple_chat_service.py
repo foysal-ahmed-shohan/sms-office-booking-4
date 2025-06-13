@@ -146,7 +146,7 @@ class SimpleChatService:
             RoomType.MEETING_ROOM: ['meeting room', 'meeting space', 'meet room', 'small room'],
             RoomType.CONFERENCE_ROOM: ['conference', 'conf room', 'large meeting', 'big room'],
             RoomType.PRIVATE_OFFICE: ['office', 'private room', 'quiet room', 'private space'],
-            RoomType.HOT_DESK: ['desk', 'hot desk', 'workspace', 'workstation'],
+            RoomType.HOT_DESK: ['hotdesk', 'hot desk', 'hot-desk', 'desk', 'workspace', 'workstation'],
             RoomType.PHONE_BOOTH: ['phone booth', 'call room', 'phone room'],
             RoomType.EVENT_SPACE: ['event space', 'event room', 'presentation']
         }
@@ -309,10 +309,35 @@ class SimpleChatService:
         
         if intent == BookingIntent.BOOK_ROOM:
             if slots.is_complete():
-                return (f"Perfect! I'll book your {slots.room_type.replace('_', ' ')} "
-                       f"in {slots.location} for {slots.capacity} people "
-                       f"on {slots.date} at {slots.time}. "
-                       f"I'll send you a confirmation shortly.")
+                # Build confirmation message
+                response = "Perfect! Let me confirm your booking details:\n\n"
+                
+                if slots.room_type:
+                    room_type_str = slots.room_type.value.replace('_', ' ').title()
+                    response += f"• Space: {room_type_str} "
+                
+                if slots.location:
+                    response += f"at our {slots.location} office\n"
+                
+                if slots.capacity:
+                    people_str = "person" if slots.capacity == 1 else "people"
+                    response += f"• Capacity: {slots.capacity} {people_str}\n"
+                
+                # Show date/time info
+                if slots.start_date and slots.start_time and slots.end_time:
+                    if slots.start_date == slots.end_date or not slots.end_date:
+                        response += f"• Date & Time: {slots.start_date} from {slots.start_time} to {slots.end_time}\n"
+                    else:
+                        response += f"• Date & Time: From {slots.start_date} at {slots.start_time} to {slots.end_date} at {slots.end_time}\n"
+                elif slots.date and slots.time:
+                    response += f"• Date & Time: {slots.date} at {slots.time}"
+                    if slots.duration:
+                        response += f" (duration: {slots.duration})"
+                    response += "\n"
+                
+                response += "\nIs this correct? Please reply 'yes' to confirm your booking or let me know what needs to be changed."
+                
+                return response
             else:
                 # Ask for all missing information at once
                 missing = slots.missing_slots()

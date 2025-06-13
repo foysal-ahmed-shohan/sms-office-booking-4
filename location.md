@@ -105,3 +105,14 @@ using this token you can able to get all location like below
     },
 
     here you can see in title has the all type of room or space or desk type . if user direclty mention then you need to match with those room, if not match then ask again. so location and room type you will get from here. handle it peropley, maiantain proper structure. dont loose or break other fucntionality. i just want to make it dynamic.
+
+
+
+
+
+
+
+            "message": "I'd be happy to help you book a space! To find the perfect spot for you, could you tell me:\n\n- Which office location works best for you? We have spaces in Dallas, New York, or Atlanta\n- What type of space do you need? We offer Dedicated desk, Hotdesk, or Meeting room\n- How many people will be joining?\n- When do you need the space? Please include both start and end times (e.g., 'Dec 5, 2025 from 2pm to 4pm' or 'tomorrow 1pm-3pm')\n\nFeel free to tell me everything at once, like 'Atlanta, meeting room for 5 people tomorrow 2pm-4pm'",
+
+
+            here you can see the final response. you can see here its saying that it want to booking and inform shortly, its fine but i want to add another things here. before booking, just take confirmation from user. like you can show this reponse full what user want . then you can ask for confirmation. if user confirm, or aproved, or say Yes, or something like that they agree then send them a message that you booking is confirm . THnak you and your officernd booking confirm at start and end date time and booking id is - 1518488548

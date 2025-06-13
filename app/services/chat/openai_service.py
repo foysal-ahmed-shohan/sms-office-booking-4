@@ -139,9 +139,10 @@ class OpenAIService:
             - room_type: Type of space needed. Available types: {self._get_available_room_types()}
               Map variations intelligently:
               * "meeting room", "meeting space", "conference room" -> "meeting_room"
-              * "desk", "hot desk", "shared desk", "workspace" -> "hot_desk" or "hotdesk"
-              * "dedicated desk", "personal desk" -> "desk"
-              Only extract if it matches available types.
+              * "hotdesk", "hot desk", "hot-desk", "shared desk", "workspace" -> "hot_desk"
+              * "dedicated desk", "personal desk" -> "dedicated_desk" if available, else "hot_desk"
+              * "desk" alone -> "hot_desk"
+              Only extract if it matches available types. Handle "hotdesk" as single word.
             
             - capacity: Number of people (extract any number mentioned with context like "for X people", "X person", "party of X")
             
@@ -286,35 +287,35 @@ class OpenAIService:
     def _handle_booking_response(self, slots: BookingSlots) -> str:
         """Handle booking intent responses"""
         if slots.is_complete():
-            # All slots filled, confirm booking
+            # All slots filled, ask for confirmation before booking
             # Build a natural confirmation message
-            response = "Wonderful! I've got everything I need. Let me confirm your booking:\n\n"
+            response = "Perfect! Let me confirm your booking details:\n\n"
             
             # Format the details in a friendly way
             if slots.room_type:
                 room_type_str = slots.room_type.value.replace('_', ' ').title()
-                response += f"• {room_type_str} "
+                response += f"• Space: {room_type_str} "
             
             if slots.location:
                 response += f"at our {slots.location} office\n"
             
             if slots.capacity:
                 people_str = "person" if slots.capacity == 1 else "people"
-                response += f"• For {slots.capacity} {people_str}\n"
+                response += f"• Capacity: {slots.capacity} {people_str}\n"
             
             # Show date/time info
             if slots.start_date and slots.start_time and slots.end_time:
                 if slots.start_date == slots.end_date or not slots.end_date:
-                    response += f"• On {slots.start_date} from {slots.start_time} to {slots.end_time}\n"
+                    response += f"• Date & Time: {slots.start_date} from {slots.start_time} to {slots.end_time}\n"
                 else:
-                    response += f"• From {slots.start_date} at {slots.start_time} to {slots.end_date} at {slots.end_time}\n"
+                    response += f"• Date & Time: From {slots.start_date} at {slots.start_time} to {slots.end_date} at {slots.end_time}\n"
             elif slots.date and slots.time:
-                response += f"• On {slots.date} at {slots.time}"
+                response += f"• Date & Time: {slots.date} at {slots.time}"
                 if slots.duration:
                     response += f" (duration: {slots.duration})"
                 response += "\n"
             
-            response += "\nI'm confirming this booking for you right now. You'll receive a confirmation message shortly with all the details!"
+            response += "\nIs this correct? Please reply 'yes' to confirm your booking or let me know what needs to be changed."
             
             return response
         else:

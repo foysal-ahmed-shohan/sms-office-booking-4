@@ -124,6 +124,10 @@ class ConversationManager:
     
     def _handle_booking_flow(self, conv_state: ConversationState, message: str) -> str:
         """Handle the booking conversation flow"""
+        # Check if we're awaiting confirmation
+        if conv_state.state == 'awaiting_confirm':
+            return self._handle_confirmation(conv_state, message)
+        
         # Get current booking slots
         current_slots = BookingSlots(**(conv_state.booking_data or {}))
         
@@ -183,13 +187,60 @@ class ConversationManager:
             conv_state.conversation_history
         )
         
-        # If booking is complete, mark conversation as completed
+        # If booking is complete, move to awaiting confirmation
         if updated_slots.is_complete():
-            conv_state.state = 'completed'
-            # In future, this is where we'd call OfficeRND API
-            logger.info(f"Booking completed for user {conv_state.user_id}: {updated_slots.to_summary()}")
+            conv_state.state = 'awaiting_confirm'
+            logger.info(f"All booking info collected for user {conv_state.user_id}, awaiting confirmation")
         
         return response
+    
+    def _handle_confirmation(self, conv_state: ConversationState, message: str) -> str:
+        """Handle booking confirmation"""
+        message_lower = message.lower().strip()
+        
+        # Check for positive confirmation
+        positive_responses = ['yes', 'yeah', 'yep', 'confirm', 'correct', 'ok', 'okay', 'sure', 'approve', 'approved', 'go ahead', 'book it']
+        
+        if any(word in message_lower for word in positive_responses):
+            # Confirmed! Process the booking
+            conv_state.state = 'confirmed'
+            slots = BookingSlots(**(conv_state.booking_data or {}))
+            
+            # In a real implementation, this is where we'd call OfficeRND API to create the booking
+            logger.info(f"Booking confirmed for user {conv_state.user_id}: {slots.to_summary()}")
+            
+            # Build confirmation message
+            # Generate a booking ID (in production, this would come from OfficeRND API)
+            import random
+            booking_id = random.randint(1000000000, 9999999999)
+            
+            response = f"Great! Your OfficeRND booking has been confirmed!\n\n"
+            
+            # Add booking details
+            if slots.room_type:
+                room_type_str = slots.room_type.value.replace('_', ' ').title()
+                response += f"• Space: {room_type_str} at {slots.location}\n"
+            if slots.capacity:
+                response += f"• Capacity: {slots.capacity} {'person' if slots.capacity == 1 else 'people'}\n"
+            if slots.start_date and slots.start_time and slots.end_time:
+                response += f"• Date & Time: {slots.start_date} from {slots.start_time} to {slots.end_time}\n"
+            
+            response += f"\nYour booking ID is: {booking_id}\n\n"
+            response += "Thank you for using OfficeRND booking service!"
+            
+            # Reset conversation for next booking
+            conv_state.booking_data = {}
+            conv_state.current_intent = None
+            conv_state.state = 'active'
+            
+            return response
+        elif any(word in message_lower for word in ['no', 'cancel', 'wrong', 'change', 'modify']):
+            # User wants to change something
+            conv_state.state = 'active'  # Go back to active state
+            return "No problem! What would you like to change? Just tell me what needs to be different."
+        else:
+            # Unclear response, ask again
+            return "I didn't quite catch that. Please reply 'yes' to confirm your booking or 'no' if you'd like to make changes."
     
     def _add_to_history(self, conv_state: ConversationState, role: str, content: str):
         """Add message to conversation history"""

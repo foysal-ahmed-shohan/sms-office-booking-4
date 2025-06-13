@@ -16,7 +16,8 @@
       "Bash(pkill:*)",
       "Bash(mv:*)",
       "Bash(ls:*)",
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "Bash(rm:*)"
     ],
     "deny": []
   }

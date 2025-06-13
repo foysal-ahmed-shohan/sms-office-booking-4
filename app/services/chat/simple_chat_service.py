@@ -269,11 +269,10 @@ class SimpleChatService:
                        f"on {slots.date} at {slots.time}. "
                        f"I'll send you a confirmation shortly.")
             else:
-                # Ask for first missing slot
+                # Ask for all missing information at once
                 missing = slots.missing_slots()
                 if missing:
-                    dynamic_prompts = get_dynamic_slot_prompts()
-                    return dynamic_prompts.get(missing[0], f"Please provide the {missing[0]}.")
+                    return self._build_missing_info_prompt(missing, slots)
         
         elif intent == BookingIntent.CANCEL_BOOKING:
             return "I can help you cancel a booking. Please provide your booking reference or details."
@@ -287,3 +286,58 @@ class SimpleChatService:
         else:
             return ("I can help you book meeting rooms and workspaces. "
                    "Just tell me what you need, like 'Book a meeting room for 5 people tomorrow at 2 PM'.")
+    
+    def _build_missing_info_prompt(self, missing: List[str], slots: BookingSlots) -> str:
+        """Build a conversational prompt for missing information"""
+        try:
+            from app.services.officernd_service import officernd_service
+            
+            # Start with a friendly opening based on what's missing
+            if len(missing) >= 4:
+                prompt = "I'd be happy to help you book a space! To find the perfect spot for you, could you tell me:\n\n"
+            elif len(missing) == 3:
+                prompt = "Great! I just need a few more details:\n\n"
+            elif len(missing) == 2:
+                prompt = "Almost there! I just need:\n\n"
+            else:
+                prompt = "Perfect! One last thing:\n\n"
+            
+            # Build conversational questions
+            questions = []
+            
+            if "location" in missing:
+                locations = officernd_service.get_location_suggestions()
+                questions.append(f"Which office location works best for you? We have spaces in {locations}")
+            
+            if "room_type" in missing:
+                room_types = officernd_service.get_resource_type_suggestions()
+                questions.append(f"What type of space do you need? We offer {room_types}")
+            
+            if "capacity" in missing:
+                questions.append("How many people will be joining?")
+            
+            if "date" in missing:
+                questions.append("When would you like to book? (You can say things like 'tomorrow' or 'next Monday')")
+            
+            if "time" in missing:
+                questions.append("What time works best for you?")
+            
+            # Join questions naturally
+            if len(questions) == 1:
+                prompt += questions[0]
+            elif len(questions) == 2:
+                prompt += f"{questions[0]}, and {questions[1].lower()}"
+            else:
+                prompt += "\n".join(f"- {q}" for q in questions)
+            
+            # Add a friendly closing
+            if len(missing) >= 3:
+                prompt += "\n\nFeel free to tell me everything at once, like 'Atlanta, meeting room for 5 people tomorrow at 2pm'"
+            
+            return prompt
+            
+        except Exception as e:
+            # Fallback to simple but friendly prompt
+            logger.warning(f"Failed to build dynamic prompt: {str(e)}")
+            missing_formatted = [m.replace('_', ' ') for m in missing]
+            return f"I'd be happy to help! Could you let me know the {', '.join(missing_formatted)}?"

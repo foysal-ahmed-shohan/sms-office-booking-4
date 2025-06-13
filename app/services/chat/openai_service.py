@@ -262,8 +262,33 @@ class OpenAIService:
         """Handle booking intent responses"""
         if slots.is_complete():
             # All slots filled, confirm booking
-            summary = slots.to_summary()
-            return f"Great! I have all the information I need. Let me confirm your booking:\n\n{summary}\n\nI'm processing your booking now. You'll receive a confirmation shortly."
+            # Build a natural confirmation message
+            response = "Wonderful! I've got everything I need. Let me confirm your booking:\n\n"
+            
+            # Format the details in a friendly way
+            if slots.room_type:
+                room_type_str = slots.room_type.value.replace('_', ' ').title()
+                response += f"• {room_type_str} "
+            
+            if slots.location:
+                response += f"at our {slots.location} office\n"
+            
+            if slots.capacity:
+                people_str = "person" if slots.capacity == 1 else "people"
+                response += f"• For {slots.capacity} {people_str}\n"
+            
+            if slots.date:
+                response += f"• On {slots.date}"
+            
+            if slots.time:
+                response += f" at {slots.time}\n"
+            
+            if slots.duration:
+                response += f"• Duration: {slots.duration}\n"
+            
+            response += "\nI'm confirming this booking for you right now. You'll receive a confirmation message shortly with all the details!"
+            
+            return response
         else:
             # Check what we have and what's missing
             missing = slots.missing_slots()
@@ -282,32 +307,29 @@ class OpenAIService:
             
             # Build response that acknowledges what we have
             if collected:
-                response = f"Thanks! I've noted: {', '.join(collected)}. "
+                # Make acknowledgments more natural
+                if len(collected) == 1:
+                    response = f"Got it - {collected[0]}! "
+                elif len(collected) == 2:
+                    response = f"Perfect! I have {collected[0]} and {collected[1]}. "
+                else:
+                    response = "Excellent! I've noted down:\n"
+                    for item in collected:
+                        response += f"• {item.capitalize()}\n"
+                    response += "\n"
             else:
                 response = ""
             
-            # Get dynamic prompts
-            dynamic_prompts = get_dynamic_slot_prompts()
-            
-            # Ask for the first missing slot
-            if missing[0] in dynamic_prompts:
-                prompt = dynamic_prompts[missing[0]]
-                response += prompt
-                
-                # Add context about remaining items if more than one missing
-                if len(missing) > 1:
-                    other_missing = [m.replace('_', ' ') for m in missing[1:]]
-                    response += f"\n\n(I'll also need: {', '.join(other_missing)})"
-            else:
-                response += f"I still need the {missing[0].replace('_', ' ')} for your booking."
+            # Get all missing information and ask for everything at once
+            response += self._build_missing_info_prompt(missing, slots)
             
             return response
     
     def _handle_unknown_intent(self, message: str) -> str:
         """Handle unknown intents with helpful guidance"""
-        return ("I can help you book meeting rooms and workspaces. "
-                "Just tell me what you need, like 'I want to book a meeting room' "
-                "or 'I need a conference room for 10 people tomorrow at 2 PM'.")
+        return ("Hi there! I'm here to help you book the perfect workspace. "
+                "You can say things like 'I need a meeting room' or "
+                "'Book a desk for tomorrow at 9am'. How can I assist you today?")
     
     def _handle_other_intents(self, intent: BookingIntent, message: str) -> str:
         """Handle other intents"""
@@ -319,3 +341,58 @@ class OpenAIService:
         }
         
         return responses.get(intent, "How can I help you with your office space needs?")
+    
+    def _build_missing_info_prompt(self, missing: List[str], slots: BookingSlots) -> str:
+        """Build a conversational prompt for missing information"""
+        try:
+            from app.services.officernd_service import officernd_service
+            
+            # Start with a friendly opening based on what's missing
+            if len(missing) >= 4:
+                prompt = "I'd be happy to help you book a space! To find the perfect spot for you, could you tell me:\n\n"
+            elif len(missing) == 3:
+                prompt = "Great! I just need a few more details:\n\n"
+            elif len(missing) == 2:
+                prompt = "Almost there! I just need:\n\n"
+            else:
+                prompt = "Perfect! One last thing:\n\n"
+            
+            # Build conversational questions
+            questions = []
+            
+            if "location" in missing:
+                locations = officernd_service.get_location_suggestions()
+                questions.append(f"Which office location works best for you? We have spaces in {locations}")
+            
+            if "room_type" in missing:
+                room_types = officernd_service.get_resource_type_suggestions()
+                questions.append(f"What type of space do you need? We offer {room_types}")
+            
+            if "capacity" in missing:
+                questions.append("How many people will be joining?")
+            
+            if "date" in missing:
+                questions.append("When would you like to book? (You can say things like 'tomorrow' or 'next Monday')")
+            
+            if "time" in missing:
+                questions.append("What time works best for you?")
+            
+            # Join questions naturally
+            if len(questions) == 1:
+                prompt += questions[0]
+            elif len(questions) == 2:
+                prompt += f"{questions[0]}, and {questions[1].lower()}"
+            else:
+                prompt += "\n".join(f"- {q}" for q in questions)
+            
+            # Add a friendly closing
+            if len(missing) >= 3:
+                prompt += "\n\nFeel free to tell me everything at once, like 'Atlanta, meeting room for 5 people tomorrow at 2pm'"
+            
+            return prompt
+            
+        except Exception as e:
+            # Fallback to simple but friendly prompt
+            logger.warning(f"Failed to build dynamic prompt: {str(e)}")
+            missing_formatted = [m.replace('_', ' ') for m in missing]
+            return f"I'd be happy to help! Could you let me know the {', '.join(missing_formatted)}?"

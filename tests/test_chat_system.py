@@ -1,11 +1,16 @@
 #!/usr/bin/env python3
 """Test the chat system locally"""
+import sys
+import os
+
+# Add parent directory to path
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import logging
 from app.database.connection import get_db_context
 from app.database.models import User
 from app.repositories.user_repository import UserRepository
 from app.services.chat.conversation_manager import ConversationManager
-import sys
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

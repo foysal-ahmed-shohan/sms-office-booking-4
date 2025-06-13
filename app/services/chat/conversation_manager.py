@@ -6,7 +6,7 @@ import logging
 from datetime import datetime, timedelta
 
 from app.database.models import User, ConversationState
-from app.services.chat.booking_schema import BookingIntent, BookingSlots
+from app.schemas.booking_schema import BookingIntent, BookingSlots
 from app.services.chat.openai_service import OpenAIService
 from app.services.chat.simple_chat_service import SimpleChatService
 

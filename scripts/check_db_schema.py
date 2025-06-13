@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
 """Check database schema"""
+import sys
+import os
+
+# Add parent directory to path
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from sqlalchemy import inspect, text
 from app.database.connection import engine
 import logging

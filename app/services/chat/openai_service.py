@@ -4,7 +4,7 @@ from typing import Dict, List, Optional, Tuple
 import json
 import logging
 from app.config import settings
-from app.services.chat.booking_schema import BookingIntent, BookingSlots, RoomType, SLOT_PROMPTS
+from app.schemas.booking_schema import BookingIntent, BookingSlots, RoomType, SLOT_PROMPTS
 
 logger = logging.getLogger(__name__)
 

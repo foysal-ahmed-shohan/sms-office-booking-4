@@ -3,7 +3,7 @@ import re
 from typing import Dict, List, Optional
 import logging
 from difflib import get_close_matches
-from app.services.chat.booking_schema import BookingIntent, BookingSlots, RoomType, SLOT_PROMPTS, AVAILABLE_LOCATIONS
+from app.schemas.booking_schema import BookingIntent, BookingSlots, RoomType, SLOT_PROMPTS, AVAILABLE_LOCATIONS
 
 logger = logging.getLogger(__name__)
 

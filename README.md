@@ -43,7 +43,7 @@ VALIDATE_TWILIO_SIGNATURE=true
 
 4. Initialize database:
 ```bash
-python manage_db.py init
+python scripts/manage_db.py init
 ```
 
 5. Run the server:
@@ -78,19 +78,19 @@ The application logs all activities to `logs/app.log`. Use the provided utility 
 
 ```bash
 # View last 50 lines
-python view_logs.py
+python scripts/view_logs.py
 
 # Follow logs in real-time
-python view_logs.py -f
+python scripts/view_logs.py -f
 
 # Search for patterns
-python view_logs.py -s "error"
+python scripts/view_logs.py -s "error"
 
 # Show only errors
-python view_logs.py -e
+python scripts/view_logs.py -e
 
 # Show SMS activity
-python view_logs.py --sms
+python scripts/view_logs.py --sms
 ```
 
 Log files rotate automatically when they reach 10MB, keeping 5 backup files.

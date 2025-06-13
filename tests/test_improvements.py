@@ -1,8 +1,13 @@
 #!/usr/bin/env python3
 """Test script to demonstrate improvements in booking system"""
+import sys
+import os
+
+# Add parent directory to path
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.services.chat.simple_chat_service import SimpleChatService
-from app.services.chat.booking_schema import BookingSlots, BookingIntent
+from app.schemas.booking_schema import BookingSlots, BookingIntent
 
 def test_multiple_info_extraction():
     """Test extraction of multiple pieces of information from a single message"""

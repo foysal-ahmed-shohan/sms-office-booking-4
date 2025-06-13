@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
 """Create conversation_states table"""
+import sys
+import os
+
+# Add parent directory to path
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from app.database.connection import engine
 from app.database.models import ConversationState
 import logging

@@ -3,10 +3,12 @@
 
 import os
 import sys
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# Add parent directory to path
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.services.chat.simple_chat_service import SimpleChatService
-from app.services.chat.booking_schema import BookingSlots, BookingIntent, SLOT_PROMPTS
+from app.schemas.booking_schema import BookingSlots, BookingIntent, SLOT_PROMPTS
 
 def simulate_conversation():
     """Simulate a real conversation showing the improvements"""

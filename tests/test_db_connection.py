@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """Test database connection and create tables"""
 import sys
+import os
+
+# Add parent directory to path
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from app.database.connection import engine, init_db, check_db_connection
 from app.database.base import Base
 from app.database.models import User, SMSMessage

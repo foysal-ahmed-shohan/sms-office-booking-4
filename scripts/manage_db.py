@@ -3,6 +3,11 @@
 Database management script for SMS Service
 """
 import sys
+import os
+
+# Add parent directory to path
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import argparse
 import subprocess
 from app.database.connection import init_db, check_db_connection

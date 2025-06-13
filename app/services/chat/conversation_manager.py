@@ -242,10 +242,44 @@ class ConversationManager:
             logger.info(f"Retrieved {len(resources)} resources from OfficeRND")
             
             if resources:
-                # For now, don't filter by type - just show all resources
-                # The API might not return consistent type values
-                filtered_resources = resources
-                logger.info(f"Showing all {len(filtered_resources)} resources (type filtering disabled)")
+                # Filter resources by type to match what user requested
+                filtered_resources = []
+                for res in resources:
+                    res_type = (res.get('type') or '').lower()
+                    res_name = (res.get('name') or '').lower()
+                    res_desc = (res.get('description') or '').lower()
+                    
+                    # Check if resource is actually a phone booth based on name/description
+                    is_phone_booth = ('booth' in res_name and 'board' not in res_name) or 'phone booth' in res_desc
+                    
+                    # Map the resource type from API to our expected types
+                    if officernd_room_type == 'hotdesk' and res_type in ['hotdesk', 'hot_desk', 'desk']:
+                        filtered_resources.append(res)
+                    elif officernd_room_type == 'meeting_room' and res_type in ['meeting_room', 'meetingroom', 'meeting'] and not is_phone_booth:
+                        # Exclude phone booths from meeting rooms
+                        filtered_resources.append(res)
+                    elif officernd_room_type == 'office' and (res_type in ['office', 'private_office', 'privateoffice', 'team_room'] or 'office' in res_name):
+                        filtered_resources.append(res)
+                    elif officernd_room_type == 'phone_booth' and (res_type in ['phone_booth', 'phonebooth', 'booth'] or is_phone_booth):
+                        filtered_resources.append(res)
+                    elif officernd_room_type == 'event_space' and res_type in ['event_space', 'eventspace', 'event']:
+                        filtered_resources.append(res)
+                
+                logger.info(f"Filtered to {len(filtered_resources)} resources matching type '{officernd_room_type}'")
+                
+                # If no resources match the type, show what's available
+                if not filtered_resources:
+                    logger.warning(f"No resources found matching type '{officernd_room_type}' at {updated_slots.location}")
+                    # Show what types ARE available
+                    available_types = set()
+                    for res in resources:
+                        if res.get('type'):
+                            available_types.add(res.get('type'))
+                    
+                    if available_types:
+                        return f"Sorry, we don't have any {room_type_display} available at {updated_slots.location}. Available space types at this location: {', '.join(sorted(available_types))}. Please choose a different room type."
+                    else:
+                        return f"Sorry, we don't have any {room_type_display} available at {updated_slots.location}. Please try a different location or room type."
                 
                 if filtered_resources:
                     # Store resources in booking data for persistence

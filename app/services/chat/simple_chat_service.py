@@ -193,32 +193,77 @@ class SimpleChatService:
                 logger.info(f"Found date: {date_match.group(1)}")
                 break
         
-        # Extract time - handle various formats including time ranges
-        # First check for time ranges like "2pm-4pm"
-        time_range_match = re.search(r'(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\s*[-–]\s*(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)', message_lower, re.IGNORECASE)
-        if time_range_match:
-            start_time = time_range_match.group(1).strip()
-            end_time = time_range_match.group(2).strip()
-            current_slots.time = start_time
-            # Calculate duration from time range
-            if not current_slots.duration:
-                current_slots.duration = "2 hours"  # Default, could be calculated
-            logger.info(f"Found time range: {start_time} to {end_time}")
-        else:
-            # Single time patterns
-            time_patterns = [
-                r'(\d{1,2}:\d{2}\s*(?:am|pm)?)',  # Match HH:MM format first
-                r'(\d{1,2}\s*(?:am|pm))',         # Then simple hour + am/pm
-                r'(\d{1,2})\s*o[\'\']*clock',
-                r'(noon|midnight|morning|afternoon|evening)'
-            ]
-            
-            for pattern in time_patterns:
-                time_match = re.search(pattern, message_lower, re.IGNORECASE)
-                if time_match:
-                    current_slots.time = time_match.group(0).strip()
-                    logger.info(f"Found time: {time_match.group(0).strip()}")
-                    break
+        # Extract date and time - handle various formats
+        # First check for complete datetime ranges like "Dec 5 2pm to 4pm" or "5/12/2025 1pm-3pm"
+        datetime_range_patterns = [
+            # Date with time range: "Dec 5 2pm to 4pm", "5/12 from 2pm to 4pm"
+            r'(\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{1,2}(?:,?\s*\d{4})?)\s+(?:from\s+)?(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\s*(?:to|-|–)\s*(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)',
+            # Numeric date with time range: "12/5/2025 2pm-4pm"
+            r'(\d{1,2}[-/]\d{1,2}[-/]\d{2,4})\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\s*(?:to|-|–)\s*(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)',
+            # Tomorrow/today with time range
+            r'(tomorrow|today)\s+(?:from\s+)?(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\s*(?:to|-|–)\s*(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)'
+        ]
+        
+        datetime_found = False
+        for pattern in datetime_range_patterns:
+            match = re.search(pattern, message_lower, re.IGNORECASE)
+            if match:
+                current_slots.start_date = match.group(1)
+                current_slots.start_time = match.group(2)
+                current_slots.end_date = match.group(1)  # Same day booking
+                current_slots.end_time = match.group(3)
+                # Also set old fields for compatibility
+                current_slots.date = match.group(1)
+                current_slots.time = match.group(2)
+                datetime_found = True
+                logger.info(f"Found datetime range: {match.group(1)} from {match.group(2)} to {match.group(3)}")
+                break
+        
+        if not datetime_found:
+            # Check for time ranges without date (just "2pm-4pm")
+            time_range_match = re.search(r'(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\s*[-–]\s*(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)', message_lower, re.IGNORECASE)
+            if time_range_match:
+                current_slots.start_time = time_range_match.group(1).strip()
+                current_slots.end_time = time_range_match.group(2).strip()
+                # Also set old fields
+                current_slots.time = current_slots.start_time
+                logger.info(f"Found time range: {current_slots.start_time} to {current_slots.end_time}")
+            else:
+                # Extract date separately
+                date_patterns = [
+                    # MM-DD-YYYY, MM/DD/YYYY, etc.
+                    r'(\d{1,2}[-/]\d{1,2}[-/]\d{2,4})',
+                    # Written dates like "Jan 5" or "January 5th"
+                    r'((?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s*\d{1,2}(?:,?\s*\d{4})?)',
+                    # Day references
+                    r'(tomorrow|today|yesterday)',
+                    # Weekday references
+                    r'((?:next\s*)?(?:mon|tue|wed|thu|fri|sat|sun)[a-z]*)',
+                ]
+                
+                for pattern in date_patterns:
+                    date_match = re.search(pattern, message_lower, re.IGNORECASE)
+                    if date_match:
+                        current_slots.date = date_match.group(1)
+                        current_slots.start_date = date_match.group(1)
+                        logger.info(f"Found date: {date_match.group(1)}")
+                        break
+                
+                # Extract single time
+                time_patterns = [
+                    r'(\d{1,2}:\d{2}\s*(?:am|pm)?)',
+                    r'(\d{1,2}\s*(?:am|pm))',
+                    r'(\d{1,2})\s*o[\'\']*clock',
+                    r'(noon|midnight|morning|afternoon|evening)'
+                ]
+                
+                for pattern in time_patterns:
+                    time_match = re.search(pattern, message_lower, re.IGNORECASE)
+                    if time_match:
+                        current_slots.time = time_match.group(0).strip()
+                        current_slots.start_time = time_match.group(0).strip()
+                        logger.info(f"Found time: {time_match.group(0).strip()}")
+                        break
         
         # Extract duration - handle various formats
         duration_patterns = {
@@ -316,11 +361,12 @@ class SimpleChatService:
             if "capacity" in missing:
                 questions.append("How many people will be joining?")
             
-            if "date" in missing:
-                questions.append("When would you like to book? (You can say things like 'tomorrow' or 'next Monday')")
-            
-            if "time" in missing:
-                questions.append("What time works best for you?")
+            if "datetime" in missing:
+                questions.append("When do you need the space? Please include both start and end times (e.g., 'Dec 5, 2025 from 2pm to 4pm' or 'tomorrow 1pm-3pm')")
+            elif "start_time" in missing:
+                questions.append("What's your start date and time?")
+            elif "end_time" in missing:
+                questions.append("Until what time do you need the space?")
             
             # Join questions naturally
             if len(questions) == 1:
@@ -330,9 +376,11 @@ class SimpleChatService:
             else:
                 prompt += "\n".join(f"- {q}" for q in questions)
             
-            # Add a friendly closing
+            # Add a friendly closing with better example
             if len(missing) >= 3:
-                prompt += "\n\nFeel free to tell me everything at once, like 'Atlanta, meeting room for 5 people tomorrow at 2pm'"
+                prompt += "\n\nFeel free to tell me everything at once, like 'Atlanta, meeting room for 5 people tomorrow 2pm-4pm'"
+            elif "datetime" in missing or "end_time" in missing:
+                prompt += "\n\nExample: 'tomorrow from 2pm to 4pm' or 'Dec 5, 2025 1pm-3pm'"
             
             return prompt
             

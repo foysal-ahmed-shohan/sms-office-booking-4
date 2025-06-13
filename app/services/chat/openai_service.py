@@ -145,14 +145,20 @@ class OpenAIService:
             
             - capacity: Number of people (extract any number mentioned with context like "for X people", "X person", "party of X")
             
-            - date: Date for booking. Understand various formats:
-              * "02-5-2026", "2/5/26", "Feb 5" -> Parse correctly
-              * "tomorrow", "next week", "monday" -> Convert to readable format
-              * Look for any date patterns
+            - start_date: Start date for booking (e.g., "Dec 5, 2025", "tomorrow", "5/12/2025")
+            - start_time: Start time (e.g., "2pm", "14:00")
+            - end_date: End date (usually same as start_date for single-day bookings)
+            - end_time: End time (e.g., "4pm", "16:00")
             
-            - time: Start time (understand "2pm", "14:00", "2 o'clock", "afternoon" etc.)
+            IMPORTANT: Look for datetime ranges like:
+            * "Dec 5 from 2pm to 4pm" -> start_date: "Dec 5", start_time: "2pm", end_date: "Dec 5", end_time: "4pm"
+            * "5/12/2025 1pm-3pm" -> start_date: "5/12/2025", start_time: "1pm", end_date: "5/12/2025", end_time: "3pm"
+            * "tomorrow 2pm-4pm" -> start_date: "tomorrow", start_time: "2pm", end_date: "tomorrow", end_time: "4pm"
             
-            - duration: How long ("1 hr", "90 minutes", "half day", "all morning")
+            Also set the deprecated fields for compatibility:
+            - date: Same as start_date
+            - time: Same as start_time
+            - duration: Calculate from start/end if possible
             
             IMPORTANT: Extract ALL information present in the message, even if multiple pieces are provided.
             For example, if user says "02-5-2026 date, meeting room", extract BOTH date AND room_type.
@@ -203,11 +209,30 @@ class OpenAIService:
                     logger.info(f"Extracted capacity: {extracted['capacity']}")
                 except:
                     logger.warning(f"Invalid capacity: {extracted.get('capacity')}")
+            # Handle new datetime fields
+            if "start_date" in extracted:
+                current_slots.start_date = extracted["start_date"]
+                logger.info(f"Extracted start_date: {extracted['start_date']}")
+            if "start_time" in extracted:
+                current_slots.start_time = extracted["start_time"]
+                logger.info(f"Extracted start_time: {extracted['start_time']}")
+            if "end_date" in extracted:
+                current_slots.end_date = extracted["end_date"]
+                logger.info(f"Extracted end_date: {extracted['end_date']}")
+            if "end_time" in extracted:
+                current_slots.end_time = extracted["end_time"]
+                logger.info(f"Extracted end_time: {extracted['end_time']}")
+                
+            # Handle old fields for compatibility
             if "date" in extracted:
                 current_slots.date = extracted["date"]
+                if not current_slots.start_date:
+                    current_slots.start_date = extracted["date"]
                 logger.info(f"Extracted date: {extracted['date']}")
             if "time" in extracted:
                 current_slots.time = extracted["time"]
+                if not current_slots.start_time:
+                    current_slots.start_time = extracted["time"]
                 logger.info(f"Extracted time: {extracted['time']}")
             if "duration" in extracted:
                 current_slots.duration = extracted["duration"]
@@ -277,14 +302,17 @@ class OpenAIService:
                 people_str = "person" if slots.capacity == 1 else "people"
                 response += f"• For {slots.capacity} {people_str}\n"
             
-            if slots.date:
-                response += f"• On {slots.date}"
-            
-            if slots.time:
-                response += f" at {slots.time}\n"
-            
-            if slots.duration:
-                response += f"• Duration: {slots.duration}\n"
+            # Show date/time info
+            if slots.start_date and slots.start_time and slots.end_time:
+                if slots.start_date == slots.end_date or not slots.end_date:
+                    response += f"• On {slots.start_date} from {slots.start_time} to {slots.end_time}\n"
+                else:
+                    response += f"• From {slots.start_date} at {slots.start_time} to {slots.end_date} at {slots.end_time}\n"
+            elif slots.date and slots.time:
+                response += f"• On {slots.date} at {slots.time}"
+                if slots.duration:
+                    response += f" (duration: {slots.duration})"
+                response += "\n"
             
             response += "\nI'm confirming this booking for you right now. You'll receive a confirmation message shortly with all the details!"
             
@@ -300,9 +328,20 @@ class OpenAIService:
                 collected.append(f"room type: {slots.room_type.replace('_', ' ')}")
             if slots.capacity:
                 collected.append(f"capacity: {slots.capacity} people")
-            if slots.date:
+            # Show datetime info in a user-friendly way
+            if slots.start_date and slots.start_time and slots.end_time:
+                if slots.start_date == slots.end_date or not slots.end_date:
+                    collected.append(f"booking: {slots.start_date} from {slots.start_time} to {slots.end_time}")
+                else:
+                    collected.append(f"booking: {slots.start_date} {slots.start_time} to {slots.end_date} {slots.end_time}")
+            elif slots.date and slots.time:
+                if slots.duration:
+                    collected.append(f"booking: {slots.date} at {slots.time} for {slots.duration}")
+                else:
+                    collected.append(f"booking: {slots.date} at {slots.time}")
+            elif slots.date:
                 collected.append(f"date: {slots.date}")
-            if slots.time:
+            elif slots.time:
                 collected.append(f"time: {slots.time}")
             
             # Build response that acknowledges what we have
@@ -371,11 +410,12 @@ class OpenAIService:
             if "capacity" in missing:
                 questions.append("How many people will be joining?")
             
-            if "date" in missing:
-                questions.append("When would you like to book? (You can say things like 'tomorrow' or 'next Monday')")
-            
-            if "time" in missing:
-                questions.append("What time works best for you?")
+            if "datetime" in missing:
+                questions.append("When do you need the space? Please include both start and end times (e.g., 'Dec 5, 2025 from 2pm to 4pm' or 'tomorrow 1pm-3pm')")
+            elif "start_time" in missing:
+                questions.append("What's your start date and time?")
+            elif "end_time" in missing:
+                questions.append("Until what time do you need the space?")
             
             # Join questions naturally
             if len(questions) == 1:
@@ -385,9 +425,11 @@ class OpenAIService:
             else:
                 prompt += "\n".join(f"- {q}" for q in questions)
             
-            # Add a friendly closing
+            # Add a friendly closing with better example
             if len(missing) >= 3:
-                prompt += "\n\nFeel free to tell me everything at once, like 'Atlanta, meeting room for 5 people tomorrow at 2pm'"
+                prompt += "\n\nFeel free to tell me everything at once, like 'Atlanta, meeting room for 5 people tomorrow 2pm-4pm'"
+            elif "datetime" in missing or "end_time" in missing:
+                prompt += "\n\nExample: 'tomorrow from 2pm to 4pm' or 'Dec 5, 2025 1pm-3pm'"
             
             return prompt
             

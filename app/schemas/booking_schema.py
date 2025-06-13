@@ -28,14 +28,22 @@ class BookingSlots(BaseModel):
     location: Optional[str] = Field(None, description="Location or city for the booking")
     room_type: Optional[RoomType] = Field(None, description="Type of room needed")
     capacity: Optional[int] = Field(None, description="Number of people")
-    date: Optional[str] = Field(None, description="Date for booking")
-    time: Optional[str] = Field(None, description="Time for booking")
-    duration: Optional[str] = Field(None, description="Duration of booking")
+    start_date: Optional[str] = Field(None, description="Start date for booking")
+    start_time: Optional[str] = Field(None, description="Start time for booking")
+    end_date: Optional[str] = Field(None, description="End date for booking")
+    end_time: Optional[str] = Field(None, description="End time for booking")
+    # Keep old fields for backward compatibility
+    date: Optional[str] = Field(None, description="Date for booking (deprecated)")
+    time: Optional[str] = Field(None, description="Time for booking (deprecated)")
+    duration: Optional[str] = Field(None, description="Duration of booking (deprecated)")
     special_requirements: Optional[str] = Field(None, description="Any special requirements")
     
     def is_complete(self) -> bool:
         """Check if all required slots are filled"""
-        required = [self.location, self.room_type, self.capacity, self.date, self.time]
+        # Check new fields first, fallback to old ones
+        has_start = (self.start_date and self.start_time) or (self.date and self.time)
+        has_end = (self.end_date and self.end_time) or self.duration
+        required = [self.location, self.room_type, self.capacity, has_start, has_end]
         return all(required)
     
     def missing_slots(self) -> List[str]:
@@ -47,10 +55,18 @@ class BookingSlots(BaseModel):
             missing.append("room_type")
         if not self.capacity:
             missing.append("capacity")
-        if not self.date:
-            missing.append("date")
-        if not self.time:
-            missing.append("time")
+        
+        # Check for date/time info
+        has_start = (self.start_date and self.start_time) or (self.date and self.time)
+        has_end = (self.end_date and self.end_time) or self.duration
+        
+        if not has_start and not has_end:
+            missing.append("datetime")  # Ask for both start and end
+        elif has_start and not has_end:
+            missing.append("end_time")  # Only need end time
+        elif not has_start and has_end:
+            missing.append("start_time")  # Only need start time
+            
         return missing
     
     def to_summary(self) -> str:

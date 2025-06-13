@@ -22,6 +22,8 @@ pip install -r requirements.txt
 TWILIO_ACCOUNT_SID=your_account_sid
 TWILIO_AUTH_TOKEN=your_auth_token
 TWILIO_PHONE_NUMBER=+1234567890
+ENABLE_SMS_SENDING=false
+VALIDATE_TWILIO_SIGNATURE=true
 ```
 
 3. Run the server:
@@ -30,7 +32,7 @@ python run.py
 # or
 ./run.sh
 # or
-uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
 ## Endpoints
@@ -49,3 +51,26 @@ uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 5. Set the HTTP method to `POST`
 
 Note: For local testing, use ngrok to expose your local server to the internet.
+
+## Logging
+
+The application logs all activities to `logs/app.log`. Use the provided utility to view logs:
+
+```bash
+# View last 50 lines
+python view_logs.py
+
+# Follow logs in real-time
+python view_logs.py -f
+
+# Search for patterns
+python view_logs.py -s "error"
+
+# Show only errors
+python view_logs.py -e
+
+# Show SMS activity
+python view_logs.py --sms
+```
+
+Log files rotate automatically when they reach 10MB, keeping 5 backup files.

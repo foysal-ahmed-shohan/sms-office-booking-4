@@ -380,6 +380,41 @@ class ConversationManager:
             conv_state.state = 'confirmed'
             slots = BookingSlots(**(conv_state.booking_data or {}))
             
+            # Get user's phone number
+            user = self.db.query(User).filter(User.id == conv_state.user_id).first()
+            if not user:
+                return "Error: Unable to find user information."
+            
+            # Check if user is an existing member or company
+            member_info = officernd_service.find_member_or_company_by_phone(user.phone_number)
+            
+            if member_info:
+                logger.info(f"Found existing {member_info['type']}: {member_info['name']} (ID: {member_info['id']})")
+            else:
+                # Create new member
+                logger.info(f"No existing member/company found for {user.phone_number}, creating new member")
+                
+                # Try to extract a name from the conversation or use phone number as name
+                member_name = f"Guest {user.phone_number}"
+                
+                # Create the member
+                new_member = officernd_service.create_member(
+                    name=member_name,
+                    phone=user.phone_number,
+                    location_id=slots.location_id,
+                    description="Created via SMS booking system"
+                )
+                
+                if new_member:
+                    member_info = {
+                        'type': 'member',
+                        'id': new_member.get('_id'),
+                        'name': new_member.get('name')
+                    }
+                else:
+                    logger.error("Failed to create member")
+                    return "Sorry, there was an error creating your member profile. Please try again."
+            
             # In a real implementation, this is where we'd call OfficeRND API to create the booking
             logger.info(f"Booking confirmed for user {conv_state.user_id}: {slots.to_summary()}")
             
@@ -403,6 +438,13 @@ class ConversationManager:
                 response += f"• Date & Time: {slots.start_date} from {slots.start_time} to {slots.end_time}\n"
             
             response += f"\nYour booking ID is: {booking_id}\n"
+            
+            # Add member/company information
+            if member_info:
+                if member_info['type'] == 'member':
+                    response += f"Member ID: {member_info['id']}\n"
+                else:
+                    response += f"Company ID: {member_info['id']}\n"
             
             # Add resource ID as requested
             if slots.resource_id:

@@ -469,6 +469,148 @@ class OfficeRNDService:
                 return res
         
         return None
+    
+    def get_members(self) -> List[Dict]:
+        """Get all members from OfficeRND"""
+        token = self._get_access_token()
+        if not token:
+            logger.error("No access token available")
+            return []
+        
+        try:
+            url = f"{self.base_url}/organizations/{self.org_slug}/members"
+            headers = {
+                'accept': 'application/json',
+                'authorization': f'Bearer {token}'
+            }
+            
+            response = requests.get(url, headers=headers)
+            response.raise_for_status()
+            
+            data = response.json()
+            members = data.get('results', [])
+            
+            logger.info(f"Retrieved {len(members)} members from OfficeRND")
+            return members
+            
+        except Exception as e:
+            logger.error(f"Failed to get members: {str(e)}")
+            return []
+    
+    def get_companies(self) -> List[Dict]:
+        """Get all companies from OfficeRND"""
+        token = self._get_access_token()
+        if not token:
+            logger.error("No access token available")
+            return []
+        
+        try:
+            url = f"{self.base_url}/organizations/{self.org_slug}/companies"
+            headers = {
+                'accept': 'application/json',
+                'authorization': f'Bearer {token}'
+            }
+            
+            response = requests.get(url, headers=headers)
+            response.raise_for_status()
+            
+            data = response.json()
+            companies = data.get('results', [])
+            
+            logger.info(f"Retrieved {len(companies)} companies from OfficeRND")
+            return companies
+            
+        except Exception as e:
+            logger.error(f"Failed to get companies: {str(e)}")
+            return []
+    
+    def find_member_or_company_by_phone(self, phone_number: str) -> Dict:
+        """Find member or company by phone number
+        Returns dict with 'type' (member/company), 'id', and 'name'
+        """
+        # Normalize phone number - remove spaces, dashes, parentheses
+        normalized_phone = ''.join(c for c in phone_number if c.isdigit() or c == '+')
+        
+        # Try different formats (with/without country code)
+        phone_variants = [normalized_phone]
+        if normalized_phone.startswith('+1'):
+            # US number with country code - also try without it
+            phone_variants.append(normalized_phone[2:])
+        elif len(normalized_phone) == 10:
+            # US number without country code - also try with it
+            phone_variants.append('+1' + normalized_phone)
+        
+        # Check members first
+        members = self.get_members()
+        for member in members:
+            member_phone = member.get('properties', {}).get('phone', '')
+            if member_phone:
+                member_phone_normalized = ''.join(c for c in member_phone if c.isdigit() or c == '+')
+                if any(variant in member_phone_normalized or member_phone_normalized in variant 
+                       for variant in phone_variants):
+                    return {
+                        'type': 'member',
+                        'id': member.get('_id'),
+                        'name': member.get('name'),
+                        'location': member.get('location')
+                    }
+        
+        # Check companies
+        companies = self.get_companies()
+        for company in companies:
+            company_phone = company.get('properties', {}).get('phone', '')
+            if company_phone:
+                company_phone_normalized = ''.join(c for c in company_phone if c.isdigit() or c == '+')
+                if any(variant in company_phone_normalized or company_phone_normalized in variant 
+                       for variant in phone_variants):
+                    return {
+                        'type': 'company',
+                        'id': company.get('_id'),
+                        'name': company.get('name'),
+                        'location': company.get('location')
+                    }
+        
+        return None
+    
+    def create_member(self, name: str, phone: str, location_id: str, description: str = None) -> Dict:
+        """Create a new member in OfficeRND"""
+        token = self._get_access_token()
+        if not token:
+            logger.error("No access token available")
+            return None
+        
+        try:
+            url = f"{self.base_url}/organizations/{self.org_slug}/members"
+            headers = {
+                'accept': 'application/json',
+                'authorization': f'Bearer {token}',
+                'content-type': 'application/json'
+            }
+            
+            # Use current date for start date
+            from datetime import datetime
+            current_date = datetime.utcnow().isoformat() + 'Z'
+            
+            data = {
+                "properties": {
+                    "phone": phone
+                },
+                "name": name,
+                "location": location_id,
+                "startDate": current_date,
+                "description": description or "This guest came from OfficeRND SMS booking system"
+            }
+            
+            response = requests.post(url, headers=headers, json=data)
+            response.raise_for_status()
+            
+            member = response.json()
+            logger.info(f"Created new member: {name} (ID: {member.get('_id')})")
+            return member
+            
+        except Exception as e:
+            logger.error(f"Failed to create member: {str(e)}")
+            return None
 
 
 # Create singleton instance

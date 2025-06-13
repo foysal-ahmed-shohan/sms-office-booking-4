@@ -611,6 +611,95 @@ class OfficeRNDService:
         except Exception as e:
             logger.error(f"Failed to create member: {str(e)}")
             return None
+    
+    def get_bookings(self, resource_id: str = None, start_date: str = None, end_date: str = None) -> List[Dict]:
+        """Get bookings from OfficeRND, optionally filtered by resource and date range"""
+        token = self._get_access_token()
+        if not token:
+            logger.error("No access token available")
+            return []
+        
+        try:
+            url = f"{self.base_url}/organizations/{self.org_slug}/bookings"
+            headers = {
+                'accept': 'application/json',
+                'authorization': f'Bearer {token}'
+            }
+            
+            # Add query parameters if provided
+            params = {}
+            if resource_id:
+                params['resource'] = resource_id
+            if start_date:
+                params['start'] = start_date
+            if end_date:
+                params['end'] = end_date
+            
+            response = requests.get(url, headers=headers, params=params)
+            response.raise_for_status()
+            
+            data = response.json()
+            bookings = data.get('results', [])
+            
+            logger.info(f"Retrieved {len(bookings)} bookings from OfficeRND")
+            return bookings
+            
+        except Exception as e:
+            logger.error(f"Failed to get bookings: {str(e)}")
+            return []
+    
+    def create_booking(self, start: str, end: str, resource_id: str, member_id: str, description: str = None) -> Dict:
+        """Create a new booking in OfficeRND"""
+        token = self._get_access_token()
+        if not token:
+            logger.error("No access token available")
+            return None
+        
+        try:
+            url = f"{self.base_url}/organizations/{self.org_slug}/bookings"
+            headers = {
+                'accept': 'application/json',
+                'authorization': f'Bearer {token}',
+                'content-type': 'application/json'
+            }
+            
+            data = {
+                "start": start,
+                "end": end,
+                "resource": resource_id,
+                "member": member_id,
+                "description": description or "This booking done from OfficeRND SMS booking system"
+            }
+            
+            response = requests.post(url, headers=headers, json=data)
+            response.raise_for_status()
+            
+            booking = response.json()
+            logger.info(f"Created booking: {booking.get('_id')} (Reference: {booking.get('reference')})")
+            return booking
+            
+        except Exception as e:
+            logger.error(f"Failed to create booking: {str(e)}")
+            if hasattr(e, 'response') and e.response:
+                logger.error(f"Response: {e.response.text}")
+            return None
+    
+    def check_availability(self, resource_id: str, start_datetime: datetime, end_datetime: datetime) -> bool:
+        """Check if a time slot is available for a resource"""
+        # Get bookings for this resource
+        bookings = self.get_bookings(resource_id=resource_id)
+        
+        # Check each booking for conflicts
+        for booking in bookings:
+            booking_start = datetime.fromisoformat(booking['start'].replace('Z', '+00:00'))
+            booking_end = datetime.fromisoformat(booking['end'].replace('Z', '+00:00'))
+            
+            # Check if the requested time overlaps with existing booking
+            if not (end_datetime <= booking_start or start_datetime >= booking_end):
+                logger.info(f"Time conflict found with booking {booking.get('_id')}")
+                return False
+        
+        return True
 
 
 # Create singleton instance

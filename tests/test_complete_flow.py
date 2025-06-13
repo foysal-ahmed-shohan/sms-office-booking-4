@@ -40,7 +40,8 @@ def test_complete_flow():
         print(f"   User: '{message}'")
         print("-"*70)
         
-        response = conv_manager.process_message(user, message)
+        result = conv_manager.process_message(user, message)
+        response, ids = result if isinstance(result, tuple) else (result, None)
         print(f"System:\n{response}")
         
         # Check for resource display
@@ -62,7 +63,8 @@ def test_complete_flow():
             if '_available_resources' in conv_state.booking_data:
                 print(f"DEBUG: Number of resources: {len(conv_state.booking_data['_available_resources'])}")
         
-        response = conv_manager.process_message(user, "2")
+        result = conv_manager.process_message(user, "2")
+        response, ids = result if isinstance(result, tuple) else (result, None)
         print(f"System:\n{response}")
         
         # Check for confirmation request
@@ -77,12 +79,16 @@ def test_complete_flow():
         print("   User: 'yes'")
         print("-"*70)
         
-        response = conv_manager.process_message(user, "yes")
+        result = conv_manager.process_message(user, "yes")
+        response, ids = result if isinstance(result, tuple) else (result, None)
         print(f"System:\n{response}")
         
         # Check for booking confirmation
-        if "your booking id is:" in response.lower() and "resource id:" in response.lower():
-            print("\n✅ Booking confirmed with resource ID!")
+        if "your booking reference is:" in response.lower():
+            print("\n✅ Booking confirmed!")
+            if ids and 'booking_id' in ids:
+                print(f"   Booking ID: {ids['booking_id']}")
+                print(f"   Reference: {ids.get('booking_reference', 'N/A')}")
         else:
             print("\n❌ ERROR: Booking confirmation incomplete!")
             

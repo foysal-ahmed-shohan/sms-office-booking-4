@@ -3,6 +3,7 @@ from typing import Dict, List, Optional
 from sqlalchemy.orm import Session
 import json
 import logging
+import re
 from datetime import datetime, timedelta
 
 from app.database.models import User, ConversationState
@@ -10,6 +11,7 @@ from app.schemas.booking_schema import BookingIntent, BookingSlots, get_dynamic_
 from app.services.chat.openai_service import OpenAIService
 from app.services.chat.simple_chat_service import SimpleChatService
 from app.services.officernd_service import officernd_service
+from app.services.booking_service import booking_service
 
 logger = logging.getLogger(__name__)
 
@@ -204,7 +206,7 @@ class ConversationManager:
             else:
                 logger.warning(f"Could not match '{message}' to any available resource")
                 # Couldn't match resource, ask again
-                return "I couldn't find that option. Please choose by name or number from the list above."
+                return "I couldn't find that option. Please choose by name or number from the list above.", None
         
         # Validate location against OfficeRND data
         if updated_slots.location and (not current_slots.location or updated_slots.location != current_slots.location):
@@ -217,7 +219,7 @@ class ConversationManager:
                 # Location not found, clear it and ask again
                 location_input = updated_slots.location
                 updated_slots.location = None
-                return f"Sorry, we don't have an office in '{location_input}'. {get_dynamic_slot_prompts()['location']}"
+                return f"Sorry, we don't have an office in '{location_input}'. {get_dynamic_slot_prompts()['location']}", None
         
         # Validate room type against OfficeRND data
         if updated_slots.room_type and (not current_slots.room_type or updated_slots.room_type != current_slots.room_type):
@@ -226,7 +228,7 @@ class ConversationManager:
             if not matched_type:
                 # Room type not found, clear it and ask again
                 updated_slots.room_type = None
-                return f"Sorry, '{room_type_str}' is not available. {get_dynamic_slot_prompts()['room_type']}"
+                return f"Sorry, '{room_type_str}' is not available. {get_dynamic_slot_prompts()['room_type']}", None
         
         # Check if we have location and room type but no resource yet
         if (updated_slots.location_id and updated_slots.room_type and 
@@ -289,9 +291,9 @@ class ConversationManager:
                             available_types.add(res.get('type'))
                     
                     if available_types:
-                        return f"Sorry, we don't have any {room_type_display} available at {updated_slots.location}. Available space types at this location: {', '.join(sorted(available_types))}. Please choose a different room type."
+                        return f"Sorry, we don't have any {room_type_display} available at {updated_slots.location}. Available space types at this location: {', '.join(sorted(available_types))}. Please choose a different room type.", None
                     else:
-                        return f"Sorry, we don't have any {room_type_display} available at {updated_slots.location}. Please try a different location or room type."
+                        return f"Sorry, we don't have any {room_type_display} available at {updated_slots.location}. Please try a different location or room type.", None
                 
                 if filtered_resources:
                     # Store resources in booking data for persistence
@@ -345,7 +347,7 @@ class ConversationManager:
                         self.db.commit()
                         
                         # Don't update booking data yet since we're waiting for resource selection
-                        return resource_prompt
+                        return resource_prompt, None
         
         # Before updating booking data, check if we only need resource selection
         missing_before_update = updated_slots.missing_slots()
@@ -363,7 +365,7 @@ class ConversationManager:
             hasattr(self, '_last_resource_prompt') and 
             not updated_slots.resource_id and  # Only show prompt if no resource selected
             '_available_resources' not in conv_state.booking_data):  # And not already showing resources
-            return self._last_resource_prompt
+            return self._last_resource_prompt, None
         
         # Generate response based on what's missing
         response = self.chat_service.generate_response(
@@ -378,7 +380,7 @@ class ConversationManager:
             conv_state.state = 'awaiting_confirm'
             logger.info(f"All booking info collected for user {conv_state.user_id}, awaiting confirmation")
         
-        return response
+        return response, None
     
     def _handle_confirmation(self, conv_state: ConversationState, message: str) -> str:
         """Handle booking confirmation"""
@@ -395,7 +397,7 @@ class ConversationManager:
             # Get user's phone number
             user = self.db.query(User).filter(User.id == conv_state.user_id).first()
             if not user:
-                return "Error: Unable to find user information."
+                return "Error: Unable to find user information.", None
             
             # Check if user is an existing member or company
             member_info = officernd_service.find_member_or_company_by_phone(user.phone_number)
@@ -425,50 +427,24 @@ class ConversationManager:
                     }
                 else:
                     logger.error("Failed to create member")
-                    return "Sorry, there was an error creating your member profile. Please try again."
+                    return "Sorry, there was an error creating your member profile. Please try again.", None
             
-            # In a real implementation, this is where we'd call OfficeRND API to create the booking
-            logger.info(f"Booking confirmed for user {conv_state.user_id}: {slots.to_summary()}")
+            # Check availability and create booking
+            booking_result = booking_service.check_and_create_booking(slots, member_info['id'])
             
-            # Build confirmation message
-            # Generate a booking ID (in production, this would come from OfficeRND API)
-            import random
-            booking_id = random.randint(1000000000, 9999999999)
+            if not booking_result['success']:
+                # Handle error or conflict
+                if booking_result.get('conflict'):
+                    # Time slot is taken, ask for another time
+                    conv_state.state = 'active'  # Go back to active state
+                return booking_result['error'], None
             
-            response = f"Great! Your OfficeRND booking has been confirmed!\n\n"
-            
-            # Add booking details
-            if slots.resource_name:
-                response += f"• Room: {slots.resource_name} at {slots.location}\n"
-            elif slots.room_type:
-                room_type_str = slots.room_type.value.replace('_', ' ').title()
-                response += f"• Space: {room_type_str} at {slots.location}\n"
-            
-            if slots.capacity:
-                response += f"• Capacity: {slots.capacity} {'person' if slots.capacity == 1 else 'people'}\n"
-            if slots.start_date and slots.start_time and slots.end_time:
-                response += f"• Date & Time: {slots.start_date} from {slots.start_time} to {slots.end_time}\n"
-            
-            response += f"\nYour booking ID is: {booking_id}\n"
-            response += "\nThank you for using OfficeRND booking service!"
-            
-            # Prepare all IDs for separate field
-            booking_ids = {
-                "booking_id": str(booking_id),
-                "location_id": slots.location_id,
-                "resource_type_id": slots.room_type.value if slots.room_type else None,
-                "resource_id": slots.resource_id,
-                "resource_name": slots.resource_name
-            }
-            
-            # Add member/company information
-            if member_info:
-                if member_info['type'] == 'member':
-                    booking_ids["member_id"] = member_info['id']
-                    booking_ids["member_name"] = member_info['name']
-                else:
-                    booking_ids["company_id"] = member_info['id']
-                    booking_ids["company_name"] = member_info['name']
+            # Format confirmation message and IDs
+            response, booking_ids = booking_service.format_booking_confirmation(
+                slots, 
+                booking_result['booking'], 
+                member_info
+            )
             
             # Reset conversation for next booking
             conv_state.booking_data = {}
@@ -479,10 +455,10 @@ class ConversationManager:
         elif any(word in message_lower for word in ['no', 'cancel', 'wrong', 'change', 'modify']):
             # User wants to change something
             conv_state.state = 'active'  # Go back to active state
-            return "No problem! What would you like to change? Just tell me what needs to be different."
+            return "No problem! What would you like to change? Just tell me what needs to be different.", None
         else:
             # Unclear response, ask again
-            return "I didn't quite catch that. Please reply 'yes' to confirm your booking or 'no' if you'd like to make changes."
+            return "I didn't quite catch that. Please reply 'yes' to confirm your booking or 'no' if you'd like to make changes.", None
     
     def _add_to_history(self, conv_state: ConversationState, role: str, content: str):
         """Add message to conversation history"""

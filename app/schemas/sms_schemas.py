@@ -56,6 +56,7 @@ class SMSReplyData(BaseModel):
     message_sid: Optional[str] = Field(None, description="Twilio message SID if sent")
     reason: Optional[str] = Field(None, description="Reason if SMS was not sent")
     error: Optional[str] = Field(None, description="Error message if any")
+    all_required_ids: Optional[dict] = Field(None, description="All IDs related to the booking")
 
 
 class SMSWebhookResponse(BaseModel):

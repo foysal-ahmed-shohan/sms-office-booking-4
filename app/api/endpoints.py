@@ -123,11 +123,19 @@ async def receive_sms(
         is_postman = "Postman" in user_agent or request.headers.get("Accept", "").startswith("application/json")
         
         # Use conversation manager to generate intelligent reply
+        booking_ids = None
         if user:
             try:
                 conversation_manager = ConversationManager(db)
-                reply_message = conversation_manager.process_message(user, sms_data.Body)
+                result = conversation_manager.process_message(user, sms_data.Body)
+                # Handle tuple response (message, booking_ids)
+                if isinstance(result, tuple):
+                    reply_message, booking_ids = result
+                else:
+                    reply_message = result
                 logger.info(f"Generated intelligent reply: {reply_message[:100]}...")
+                if booking_ids:
+                    logger.info(f"Booking IDs: {booking_ids}")
             except Exception as e:
                 logger.error(f"Error in conversation manager: {str(e)}")
                 # Fallback to simple reply if chat system fails
@@ -140,7 +148,8 @@ async def receive_sms(
             message=reply_message,
             timestamp=current_time,
             sms_sent=False,
-            sms_sending_enabled=settings.enable_sms_sending
+            sms_sending_enabled=settings.enable_sms_sending,
+            all_required_ids=booking_ids  # Add booking IDs if available
         )
         
         # Store inbound SMS message

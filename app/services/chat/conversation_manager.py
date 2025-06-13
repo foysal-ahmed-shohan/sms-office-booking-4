@@ -32,8 +32,10 @@ class ConversationManager:
         
         self.max_history_messages = 10  # Keep last 10 messages for context
         
-    def process_message(self, user: User, message: str) -> str:
-        """Process incoming message and generate response"""
+    def process_message(self, user: User, message: str) -> tuple:
+        """Process incoming message and generate response
+        Returns: (response_text, booking_ids_dict)
+        """
         try:
             # Get or create conversation state
             conv_state = self._get_or_create_conversation(user)
@@ -63,9 +65,17 @@ class ConversationManager:
             if intent != BookingIntent.UNKNOWN:
                 conv_state.current_intent = intent.value
             
+            # Initialize booking IDs dict
+            booking_ids = None
+            
             # Handle based on intent
             if intent == BookingIntent.BOOK_ROOM or conv_state.current_intent == 'book_room':
-                response = self._handle_booking_flow(conv_state, message)
+                result = self._handle_booking_flow(conv_state, message)
+                # Check if result is tuple (has IDs)
+                if isinstance(result, tuple):
+                    response, booking_ids = result
+                else:
+                    response = result
             else:
                 # For other intents, generate response
                 slots = BookingSlots(**(conv_state.booking_data or {}))
@@ -86,12 +96,12 @@ class ConversationManager:
             # Save conversation state
             self.db.commit()
             
-            return response
+            return response, booking_ids
             
         except Exception as e:
             logger.error(f"Error processing message: {str(e)}")
             self.db.rollback()
-            return "I apologize, but I'm having trouble processing your request. Please try again."
+            return "I apologize, but I'm having trouble processing your request. Please try again.", None
     
     def _get_or_create_conversation(self, user: User) -> ConversationState:
         """Get existing or create new conversation state"""
@@ -122,8 +132,10 @@ class ConversationManager:
         
         return conv_state
     
-    def _handle_booking_flow(self, conv_state: ConversationState, message: str) -> str:
-        """Handle the booking conversation flow"""
+    def _handle_booking_flow(self, conv_state: ConversationState, message: str):
+        """Handle the booking conversation flow
+        Returns: response string or (response, booking_ids) tuple
+        """
         # Check if we're awaiting confirmation
         if conv_state.state == 'awaiting_confirm':
             return self._handle_confirmation(conv_state, message)
@@ -438,26 +450,32 @@ class ConversationManager:
                 response += f"• Date & Time: {slots.start_date} from {slots.start_time} to {slots.end_time}\n"
             
             response += f"\nYour booking ID is: {booking_id}\n"
+            response += "\nThank you for using OfficeRND booking service!"
+            
+            # Prepare all IDs for separate field
+            booking_ids = {
+                "booking_id": str(booking_id),
+                "location_id": slots.location_id,
+                "resource_type_id": slots.room_type.value if slots.room_type else None,
+                "resource_id": slots.resource_id,
+                "resource_name": slots.resource_name
+            }
             
             # Add member/company information
             if member_info:
                 if member_info['type'] == 'member':
-                    response += f"Member ID: {member_info['id']}\n"
+                    booking_ids["member_id"] = member_info['id']
+                    booking_ids["member_name"] = member_info['name']
                 else:
-                    response += f"Company ID: {member_info['id']}\n"
-            
-            # Add resource ID as requested
-            if slots.resource_id:
-                response += f"Resource ID: {slots.resource_id}\n"
-            
-            response += "\nThank you for using OfficeRND booking service!"
+                    booking_ids["company_id"] = member_info['id']
+                    booking_ids["company_name"] = member_info['name']
             
             # Reset conversation for next booking
             conv_state.booking_data = {}
             conv_state.current_intent = None
             conv_state.state = 'active'
             
-            return response
+            return response, booking_ids
         elif any(word in message_lower for word in ['no', 'cancel', 'wrong', 'change', 'modify']):
             # User wants to change something
             conv_state.state = 'active'  # Go back to active state

@@ -17,8 +17,9 @@ aioredis==2.0.1
 # Twilio
 twilio==8.13.0
 
-# OpenAI and DSPy
+# OpenAI and AI Libraries
 openai==1.12.0
+langchain==0.1.0
 dspy-ai==2.4.0
 
 # Environment and Configuration

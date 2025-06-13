@@ -16,6 +16,10 @@ class Settings(BaseSettings):
     enable_sms_sending: bool = Field(default=False, env="ENABLE_SMS_SENDING")
     validate_twilio_signature: bool = Field(default=True, env="VALIDATE_TWILIO_SIGNATURE")
     
+    # OpenAI Configuration
+    openai_api_key: str = Field(..., env="OPENAI_API_KEY")
+    openai_model: str = Field(default="gpt-4", env="OPENAI_MODEL")
+    
     # Server Configuration
     host: str = Field(default="0.0.0.0", env="HOST")
     port: int = Field(default=8000, env="PORT")

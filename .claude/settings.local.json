@@ -12,7 +12,8 @@
       "Bash(chmod:*)",
       "Bash(python:*)",
       "Bash(curl:*)",
-      "Bash(mkdir:*)"
+      "Bash(mkdir:*)",
+      "Bash(pkill:*)"
     ],
     "deny": []
   }

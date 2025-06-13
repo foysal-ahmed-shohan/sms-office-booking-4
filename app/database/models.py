@@ -1,5 +1,6 @@
-from sqlalchemy import Column, String, Text, Integer, ForeignKey, Index, JSON
+from sqlalchemy import Column, String, Text, Integer, ForeignKey, Index, JSON, DateTime
 from sqlalchemy.orm import relationship
+from sqlalchemy.sql import func
 from app.database.base import BaseModel
 import logging
 
@@ -30,6 +31,7 @@ class User(BaseModel):
     
     # Relationships
     sms_messages = relationship("SMSMessage", back_populates="user", cascade="all, delete-orphan")
+    conversation_state = relationship("ConversationState", back_populates="user", uselist=False, cascade="all, delete-orphan")
     
     # Indexes
     __table_args__ = (
@@ -39,6 +41,29 @@ class User(BaseModel):
     
     def __repr__(self):
         return f"<User(id={self.id}, phone={self.phone_number})>"
+
+
+class ConversationState(BaseModel):
+    """Conversation state for tracking booking context"""
+    __tablename__ = "conversation_states"
+    
+    # Foreign key to user
+    user_id = Column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
+    
+    # Conversation state
+    current_intent = Column(String(50), nullable=True)  # booking, cancel, info, etc.
+    booking_data = Column(JSON, nullable=True, default=dict)  # Collected booking information
+    conversation_history = Column(JSON, nullable=True, default=list)  # Recent messages for context
+    state = Column(String(20), default='active')  # active, completed, cancelled
+    
+    # Timestamps for conversation management
+    last_interaction = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    
+    # Relationships
+    user = relationship("User", back_populates="conversation_state")
+    
+    def __repr__(self):
+        return f"<ConversationState(user_id={self.user_id}, intent={self.current_intent})>"
 
 
 class SMSMessage(BaseModel):

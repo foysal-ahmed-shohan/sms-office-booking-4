@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from datetime import datetime
 import pytz
 import logging
+import uuid
 from typing import Dict, Optional
 
 from app.schemas import (
@@ -20,6 +21,7 @@ from app.database.connection import get_db
 from app.repositories.user_repository import UserRepository
 from app.repositories.sms_repository import SMSRepository
 from app.database.models import User, SMSMessage
+from app.services.chat.conversation_manager import ConversationManager
 
 
 logger = logging.getLogger(__name__)
@@ -101,8 +103,37 @@ async def receive_sms(
         # Get current datetime
         current_time = datetime.now(pytz.UTC).strftime("%Y-%m-%d %H:%M:%S %Z")
         
-        # Create reply message
-        reply_message = f"Hello! I received your message: '{sms_data.Body}' from phone number: {sms_data.From} at {current_time}"
+        # Initialize repositories
+        user_repo = UserRepository(db)
+        sms_repo = SMSRepository(db)
+        
+        # Store/get user in database FIRST
+        try:
+            user = user_repo.create_or_update(
+                phone_number=sms_data.From,
+                twilio_phone_number=sms_data.To
+            )
+            logger.info(f"User stored/updated in database: {user.id}")
+        except Exception as e:
+            logger.error(f"Database error creating/updating user: {str(e)}")
+            user = None
+        
+        # Check if request expects JSON response (from Postman)
+        user_agent = request.headers.get("User-Agent", "")
+        is_postman = "Postman" in user_agent or request.headers.get("Accept", "").startswith("application/json")
+        
+        # Use conversation manager to generate intelligent reply
+        if user:
+            try:
+                conversation_manager = ConversationManager(db)
+                reply_message = conversation_manager.process_message(user, sms_data.Body)
+                logger.info(f"Generated intelligent reply: {reply_message[:100]}...")
+            except Exception as e:
+                logger.error(f"Error in conversation manager: {str(e)}")
+                # Fallback to simple reply if chat system fails
+                reply_message = "I'm sorry, I'm having trouble understanding your request. Please try again or call our support."
+        else:
+            reply_message = "I'm sorry, I'm having trouble accessing your account. Please try again later."
         
         # Prepare reply data
         reply_data = SMSReplyData(
@@ -112,39 +143,31 @@ async def receive_sms(
             sms_sending_enabled=settings.enable_sms_sending
         )
         
-        # Initialize repositories
-        user_repo = UserRepository(db)
-        sms_repo = SMSRepository(db)
-        
-        # Store user in database
-        try:
-            user = user_repo.create_or_update(
-                phone_number=sms_data.From,
-                twilio_phone_number=sms_data.To
-            )
-            logger.info(f"User stored/updated in database: {user.id}")
-            
-            # Store inbound SMS message
-            inbound_sms = sms_repo.create_message(
-                user_id=user.id,
-                direction='inbound',
-                from_number=sms_data.From,
-                to_number=sms_data.To,
-                message_body=sms_data.Body,
-                message_sid=sms_data.MessageSid,
-                account_sid=sms_data.AccountSid,
-                messaging_service_sid=sms_data.MessagingServiceSid,
-                num_media=int(sms_data.NumMedia or 0)
-            )
-            logger.info(f"Inbound SMS stored in database: {inbound_sms.id}")
-            
-        except Exception as e:
-            logger.error(f"Database error storing SMS data: {str(e)}")
-            # Continue processing even if database fails
-        
-        # Check if request expects JSON response (from Postman)
-        user_agent = request.headers.get("User-Agent", "")
-        is_postman = "Postman" in user_agent or request.headers.get("Accept", "").startswith("application/json")
+        # Store inbound SMS message
+        if user:
+            try:
+                # Generate unique MessageSid for testing if not provided or if it's a duplicate
+                message_sid = sms_data.MessageSid
+                if not message_sid or is_postman:
+                    # For testing, generate a unique message SID
+                    message_sid = f"TEST_{uuid.uuid4().hex[:32]}"
+                    logger.debug(f"Generated test MessageSid: {message_sid}")
+                
+                inbound_sms = sms_repo.create_message(
+                    user_id=user.id,
+                    direction='inbound',
+                    from_number=sms_data.From,
+                    to_number=sms_data.To,
+                    message_body=sms_data.Body,
+                    message_sid=message_sid,
+                    account_sid=sms_data.AccountSid,
+                    messaging_service_sid=sms_data.MessagingServiceSid,
+                    num_media=int(sms_data.NumMedia or 0)
+                )
+                logger.info(f"Inbound SMS stored in database: {inbound_sms.id}")
+            except Exception as e:
+                logger.error(f"Database error storing SMS data: {str(e)}")
+                # Continue processing even if database fails
         
         # Always store the reply message in database (regardless of SMS sending)
         outbound_sms = None
@@ -166,12 +189,20 @@ async def receive_sms(
                     status = 'failed'
                     error_msg = error
                     message_sid = None
+                    # Generate test MessageSid for failed sends during testing
+                    if is_postman:
+                        message_sid = f"TEST_FAIL_{uuid.uuid4().hex[:32]}"
             else:
                 # SMS sending disabled - still store the reply
                 reply_data.reason = "SMS sending disabled in configuration"
                 status = 'draft'  # Not sent but prepared
                 message_sid = None
                 error_msg = None
+            
+            # Generate unique MessageSid for outbound testing if needed
+            if not message_sid and is_postman:
+                message_sid = f"TEST_OUT_{uuid.uuid4().hex[:32]}"
+                logger.debug(f"Generated test outbound MessageSid: {message_sid}")
             
             # Store outbound SMS in database
             outbound_sms = sms_repo.create_message(

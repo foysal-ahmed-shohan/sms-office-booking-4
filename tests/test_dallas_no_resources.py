@@ -2,7 +2,7 @@
 """Test Dallas location with no resources"""
 import sys
 import os
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.database.connection import get_db
 from app.services.chat.conversation_manager import ConversationManager
@@ -41,12 +41,15 @@ def test_dallas_no_resources():
         print(f"System:\n{response}")
         
         # Check response
-        if "don't have any meeting room available at Dallas" in response:
+        if "no bookable spaces available at our Dallas location" in response:
             print("\n✅ Correctly handled location with no resources!")
+            print("   System properly suggested other locations")
+        elif "don't have any meeting room available at Dallas" in response:
+            print("\n✅ Correctly handled - no meeting rooms at Dallas")
         elif "noted down" in response.lower():
-            print("\n❓ System noted down info - Dallas has no meeting rooms to show")
+            print("\n❌ ERROR: System just noted down info instead of informing about no resources")
         else:
-            print("\n❓ Unexpected response")
+            print("\n❓ Response not matching expected patterns")
             
     finally:
         # Cleanup

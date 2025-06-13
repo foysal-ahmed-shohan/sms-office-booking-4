@@ -255,6 +255,11 @@ class ConversationManager:
             
             logger.info(f"Retrieved {len(resources)} resources from OfficeRND")
             
+            # Check if location has any resources at all
+            if not resources:
+                logger.warning(f"No resources found at {updated_slots.location}")
+                return f"Sorry, there are no bookable spaces available at our {updated_slots.location} location. Please choose a different location. We have offices in: {', '.join([loc['name'] for loc in officernd_service.get_locations() if loc['name'] != updated_slots.location])}.", None
+            
             if resources:
                 # Filter resources by type to match what user requested
                 filtered_resources = []
@@ -290,10 +295,37 @@ class ConversationManager:
                         if res.get('type'):
                             available_types.add(res.get('type'))
                     
+                    # Get user-friendly names for available types
+                    type_mapping = {
+                        'hotdesk': 'hot desk',
+                        'hot_desk': 'hot desk',
+                        'desk': 'hot desk',
+                        'meeting_room': 'meeting room',
+                        'meetingroom': 'meeting room',
+                        'meeting': 'meeting room',
+                        'office': 'private office',
+                        'private_office': 'private office',
+                        'privateoffice': 'private office',
+                        'team_room': 'team room',
+                        'phone_booth': 'phone booth',
+                        'phonebooth': 'phone booth',
+                        'booth': 'phone booth',
+                        'event_space': 'event space',
+                        'eventspace': 'event space'
+                    }
+                    
                     if available_types:
-                        return f"Sorry, we don't have any {room_type_display} available at {updated_slots.location}. Available space types at this location: {', '.join(sorted(available_types))}. Please choose a different room type.", None
+                        friendly_types = []
+                        for t in available_types:
+                            friendly_name = type_mapping.get(t.lower(), t)
+                            if friendly_name not in friendly_types:
+                                friendly_types.append(friendly_name)
+                        
+                        return f"Sorry, we don't have any {room_type_display} available at {updated_slots.location}. However, we do have: {', '.join(sorted(friendly_types))}. Would you like to book one of these instead?", None
                     else:
-                        return f"Sorry, we don't have any {room_type_display} available at {updated_slots.location}. Please try a different location or room type.", None
+                        # Get other locations
+                        other_locations = [loc['name'] for loc in officernd_service.get_locations() if loc['name'] != updated_slots.location]
+                        return f"Sorry, we don't have any {room_type_display} available at {updated_slots.location}. Please try one of our other locations: {', '.join(other_locations)}.", None
                 
                 if filtered_resources:
                     # Store resources in booking data for persistence
